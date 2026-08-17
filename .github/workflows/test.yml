@@ -1,0 +1,23 @@
+name: test
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: |
+          test -z "$(find . -type d -name __pycache__ -not -path './.git/*' -print)"
+          test -z "$(find . -type f -name '*.pyc' -not -path './.git/*' -print)"
+      - run: python3 -m unittest tests.test_installer -v
+      - run: cd runtime && python3 -m unittest discover -s tests -p 'test*.py'
+      - run: python3 -m compileall -q install.py runtime/scripts runtime/adapters runtime/bin

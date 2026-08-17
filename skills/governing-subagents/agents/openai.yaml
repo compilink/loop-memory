@@ -1,0 +1,4 @@
+interface:
+  display_name: "Govern Subagents"
+  short_description: "Control subagent lifecycle and task-tree growth"
+  default_prompt: "Use $governing-subagents to audit this task tree before delegating more work."

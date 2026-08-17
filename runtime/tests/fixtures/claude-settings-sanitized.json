@@ -1,0 +1,29 @@
+{
+  "env": {
+    "FIXTURE_NAME": "fixture-value"
+  },
+  "permissions": {
+    "allow": [
+      "Read(fixture-path)"
+    ],
+    "deny": []
+  },
+  "model": "fixture-model",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Read",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "fixture-command"
+          }
+        ]
+      }
+    ],
+    "SessionEnd": []
+  },
+  "future": {
+    "fixture": true
+  }
+}

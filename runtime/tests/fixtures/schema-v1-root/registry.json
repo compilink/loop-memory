@@ -1,0 +1,1 @@
+{"schema_version":1,"projects":{"p-one":{"kind":"directory","shared_roots":[],"roots":["/external/project","/external/project-alias"],"upstream_refs":[]}},"sessions":{"s-one":{"project_id":"p-one","thread_id":"host-id"}},"legacy_aliases":{"/external/legacy/.memory":{"target":"@ROOT@/projects/p-one","migration_id":"m-00000000000000000000000000000000"}},"maintenance":{}}

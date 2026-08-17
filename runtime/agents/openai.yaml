@@ -1,0 +1,4 @@
+interface:
+  display_name: "Manage Loop Memory"
+  short_description: "Manage Loop engineering memory safely"
+  default_prompt: "Use $managing-loop-memory to resolve, update, migrate, or maintain local Loop engineering memory."

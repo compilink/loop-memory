@@ -1,0 +1,7 @@
+{
+  "version": 1,
+  "session_id": "claude-session-1",
+  "cwd": "/tmp/loop-memory-fixture/project",
+  "hook_event_name": "SessionStart",
+  "source": "resume"
+}

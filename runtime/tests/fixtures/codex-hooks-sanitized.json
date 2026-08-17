@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "hooks": {
+    "BeforeTool": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "fixture-command"
+          }
+        ]
+      }
+    ],
+    "SessionStart": []
+  },
+  "future": {
+    "fixture": true
+  }
+}

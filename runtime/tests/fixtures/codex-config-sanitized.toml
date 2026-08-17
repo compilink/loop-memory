@@ -1,0 +1,10 @@
+model = "fixture-model"
+sandbox_mode = "workspace-write"
+
+[sandbox_workspace_write]
+network_access = false
+writable_roots = ["~/existing", "~/loop-memory/", "~/loop-memory"]
+unrelated = "fixture-value"
+
+[future]
+enabled = true
