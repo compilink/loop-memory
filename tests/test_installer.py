@@ -11,6 +11,11 @@ import install
 
 
 class ManagedBlockTests(unittest.TestCase):
+    def test_exact_unmarked_payload_converges_to_one_managed_block(self):
+        payload = "# AGENTS.md\n\nMethod.\n"
+        merged = install.merge_managed_block(payload, payload)
+        self.assertEqual(merged, install._render_block(payload) + "\n")
+
     def test_append_preserves_existing_bytes_as_prefix(self):
         existing = "# Personal rules\n\nKeep this."
         merged = install.merge_managed_block(existing, "## Loop Engineering\n\nMethod.")
@@ -53,9 +58,16 @@ class PackageHygieneTests(unittest.TestCase):
     def test_repository_payload_has_no_live_memory_or_machine_paths(self):
         install.validate_package(install.SOURCE_ROOT)
 
+    def test_repository_guidance_has_no_access_denial_typo(self):
+        for path in (
+            install.SOURCE_ROOT / "skills/managing-loop-memory/SKILL.md",
+            install.SOURCE_ROOT / "runtime/SKILL.md",
+        ):
+            self.assertNotIn("If the If access", path.read_text(encoding="utf-8"))
+
 
 class StagingTests(unittest.TestCase):
-    def test_stage_contains_codex_runtime_only_and_two_skills(self):
+    def test_stage_contains_codex_runtime_only_and_three_skills(self):
         with tempfile.TemporaryDirectory() as temporary:
             home = Path(temporary) / "home"
             stage = Path(temporary) / "stage"
@@ -69,6 +81,7 @@ class StagingTests(unittest.TestCase):
                     ".local/bin/loop-memory",
                     ".codex/skills/managing-loop-memory",
                     ".codex/skills/governing-subagents",
+                    ".codex/skills/governing-task-scope",
                     ".codex/AGENTS.md",
                     ".codex/config.toml",
                     ".codex/hooks.json",

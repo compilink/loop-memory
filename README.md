@@ -67,5 +67,6 @@ hooks, and the managed AGENTS block. It never deletes `~/loop-memory`.
 ## Data boundary
 
 The repository contains reusable methodology, runtime code, synthetic tests,
-and two Skills. It does not contain or export any user's project, session,
+and three Skills: `managing-loop-memory`, `governing-subagents`, and
+`governing-task-scope`. It does not contain or export any user's project, session,
 fact, registry, migration, or legacy memory data.

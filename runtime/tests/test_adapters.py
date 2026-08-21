@@ -111,6 +111,30 @@ class AdapterContractTests(unittest.TestCase):
         self.assertIn("~/loop-memory", json.dumps(output))
         self.assertNotIn("access denied", output.get("systemMessage", ""))
 
+    def test_access_denial_blocks_external_side_effects_until_recovery(self):
+        from adapters import codex_hook
+
+        denied = subprocess.CompletedProcess([], 3, json.dumps({
+            "ok": False, "error": {"code": "environment_access_denied"},
+            "required_access": {"path": "~/loop-memory", "read": True, "write": True, "execute": False},
+            "next_action": "request_environment_access",
+        }), "")
+        with mock.patch.object(codex_hook.subprocess, "run", return_value=denied):
+            output = codex_hook.handle(self.load("codex-session-start.json"))
+
+        context = json.loads(output["hookSpecificOutput"]["additionalContext"])
+        loop_memory = context["loop_memory"]
+        self.assertTrue(loop_memory["blocked"])
+        self.assertEqual(
+            loop_memory["block_scope"],
+            "trusted_state_writes_and_irreversible_external_side_effects",
+        )
+        self.assertEqual(
+            loop_memory["allowed_actions"],
+            ["read_only_diagnosis", "recoverable_local_work"],
+        )
+        self.assertEqual(loop_memory["next_action"], "request_environment_access")
+
     def test_access_denial_retries_exactly_once_after_approval(self):
         from adapters import codex_hook
 

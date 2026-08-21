@@ -21,7 +21,11 @@ SOURCE_ROOT = Path(__file__).resolve().parent
 RUNTIME_ROOT = SOURCE_ROOT / "runtime"
 BEGIN_MARKER = "<!-- BEGIN LOOP ENGINEERING MANAGED -->"
 END_MARKER = "<!-- END LOOP ENGINEERING MANAGED -->"
-SKILL_NAMES = ("managing-loop-memory", "governing-subagents")
+SKILL_NAMES = (
+    "managing-loop-memory",
+    "governing-subagents",
+    "governing-task-scope",
+)
 CACHE_NAMES = {"__pycache__", ".DS_Store"}
 
 if str(RUNTIME_ROOT) not in sys.path:
@@ -69,6 +73,11 @@ def merge_managed_block(existing: str, payload: str) -> str:
         return existing[:start] + rendered + existing[end:]
     if not existing:
         return rendered + "\n"
+    # A previous installer version could publish the exact managed payload
+    # without markers. Converge that unambiguous case to one managed block;
+    # any other unmarked content remains user-owned and is preserved.
+    if existing.strip() == payload.strip():
+        return rendered + "\n"
     separator = "\n" if existing.endswith("\n") else "\n\n"
     return existing + separator + rendered + "\n"
 
@@ -98,6 +107,8 @@ def validate_package(root: Path) -> None:
         root / "runtime/bin/loop-memory",
         root / "skills/managing-loop-memory/SKILL.md",
         root / "skills/governing-subagents/SKILL.md",
+        root / "skills/governing-task-scope/SKILL.md",
+        root / "skills/governing-task-scope/scripts/scope_guard.py",
         root / "global/AGENTS.loop-engineering.md",
         root / "global/global-long-methodology.md",
     )
@@ -253,6 +264,12 @@ def stage_install(home: Path, stage: Path) -> tuple[list[Target], dict[str, obje
             ".codex/skills/governing-subagents",
             home / ".codex/skills/governing-subagents",
             skill_stages["governing-subagents"],
+            "tree",
+        ),
+        Target(
+            ".codex/skills/governing-task-scope",
+            home / ".codex/skills/governing-task-scope",
+            skill_stages["governing-task-scope"],
             "tree",
         ),
         Target(".codex/AGENTS.md", codex / "AGENTS.md", agents, "file"),
@@ -576,6 +593,7 @@ def _verify_removable_managed_files(
         ".local/bin/loop-memory",
         ".codex/skills/managing-loop-memory",
         ".codex/skills/governing-subagents",
+        ".codex/skills/governing-task-scope",
     )
     for key in guarded:
         metadata = managed.get(key)
@@ -644,6 +662,7 @@ def stage_uninstall(home: Path, stage: Path) -> tuple[list[Target], list[Path]]:
         home / ".local/bin/loop-memory",
         home / ".codex/skills/managing-loop-memory",
         home / ".codex/skills/governing-subagents",
+        home / ".codex/skills/governing-task-scope",
         home / ".local/state/loop-memory-installer/manifest.json",
     ]
     return rewrite, remove

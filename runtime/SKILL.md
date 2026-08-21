@@ -15,17 +15,17 @@ product-memory storage; product memory remains opaque and complementary.
 
 ## Hot Path
 
-1. Call `enter` with the actual cwd, host session ID, optional host-known
-   project root, and the current subagent ID when applicable. Do this before
-   each ordinary operation and again after resume, compaction, handoff, or a
-   cwd, worktree, or project change.
+1. Call `enter` with actual cwd, host session ID, known project root, and
+   subagent ID. Re-enter after resume, compaction, handoff, or cwd/project
+   changes.
 2. If `environment_access_denied` returns typed `required_access`, ask the host
    for exactly `~/loop-memory` read and write access, then retry once. If the
-   request is refused, unsupported, changes path or modes, or the retry fails,
-   stop that operation without broadening access.
-3. Require `ok=true`; honor every returned `capabilities` value and `degraded`
-   notice by scope. An unrelated degraded capability does not disable an
-   available one. Read only the smallest relevant returned paths.
+   access is refused or retry fails, stop Loop Memory writes, promotion,
+   migration, and irreversible external side effects. Read-only
+   diagnosis and recoverable local work may continue; report the typed block.
+3. Require `ok=true`; honor returned capabilities and scoped degradation.
+   Unrelated degradation does not disable available capabilities. Read only
+   permitted returned paths.
 4. Write through `session-write` or `promote`, then verify the direct result.
    Keep `status` as live state and `handoff` as a compaction, transfer, or close
    snapshot. Do not write when no durable learning or resumable state changed.

@@ -187,14 +187,58 @@ def _access_output(event: HostEvent, payload: Mapping[str, object]) -> dict[str,
         and required.get("execute") is False
     )
     if not exact:
-        message = "Loop Memory access is unavailable; no safe access request could be derived."
-        return {"systemMessage": message, "hookSpecificOutput": {"hookEventName": event.event_name, "additionalContext": message}}
-    message = "Loop Memory requires read/write access to ~/loop-memory. Grant that access, then retry once."
+        message = (
+            "Loop Memory access is unavailable; no safe access request could be "
+            "derived. Loop Memory writes, promotion, migration, and irreversible "
+            "external side effects are blocked until enter succeeds; read-only "
+            "diagnosis and recoverable local work may continue."
+        )
+        context = {
+            "loop_memory": {
+                "ok": False,
+                "blocked": True,
+                "reason": "environment_access_denied",
+                "block_scope": "trusted_state_writes_and_irreversible_external_side_effects",
+                "allowed_actions": [
+                    "read_only_diagnosis",
+                    "recoverable_local_work",
+                ],
+                "next_action": "stop_and_report",
+            }
+        }
+    else:
+        message = (
+            "Loop Memory requires read/write access to ~/loop-memory. Grant that "
+            "access, then retry once. Loop Memory writes, promotion, migration, "
+            "and irreversible external side effects are blocked until enter "
+            "succeeds; read-only diagnosis and recoverable local work may continue."
+        )
+        context = {
+            "loop_memory": {
+                "ok": False,
+                "blocked": True,
+                "reason": "environment_access_denied",
+                "block_scope": "trusted_state_writes_and_irreversible_external_side_effects",
+                "allowed_actions": [
+                    "read_only_diagnosis",
+                    "recoverable_local_work",
+                ],
+                "required_access": {
+                    "path": "~/loop-memory",
+                    "read": True,
+                    "write": True,
+                    "execute": False,
+                },
+                "next_action": "request_environment_access",
+            }
+        }
     return {
         "systemMessage": message,
         "hookSpecificOutput": {
             "hookEventName": event.event_name,
-            "additionalContext": message,
+            "additionalContext": json.dumps(
+                context, separators=(",", ":"), sort_keys=True
+            ),
         },
     }
 

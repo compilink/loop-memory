@@ -18,6 +18,12 @@ operations.  Lifecycle adapters are synchronous and bounded and pass only
 host identity to `enter`; memory bodies and configuration values are not
 rendered into hook context or validation output.
 
+If `enter` returns `environment_access_denied`, the adapter emits a structured
+blocked context. The host may request exactly `~/loop-memory` read/write access
+and retry once. Until a successful `enter`, the Agent must stop Loop Memory
+writes, promotion, migration, and irreversible external side effects; read-only
+diagnosis and recoverable local work may continue.
+
 `stage_user_config.py` consumes sanitized inputs and writes disposable
 `config.toml`, `hooks.json`, and `settings.json` artifacts.  The merge keeps
 unknown settings and existing hook definitions, adds only the required

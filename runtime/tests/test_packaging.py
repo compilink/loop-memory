@@ -139,6 +139,24 @@ class LauncherTests(unittest.TestCase):
         ):
             self.assertIn(required, corpus)
 
+    def test_access_denial_docs_keep_recoverable_work_available(self):
+        main = (RUNTIME / "SKILL.md").read_text(encoding="utf-8")
+        operations = (RUNTIME / "references" / "operations.md").read_text(encoding="utf-8")
+        readme = (RUNTIME / "README.md").read_text(encoding="utf-8")
+        corpus = (main + "\n" + operations + "\n" + readme).lower()
+        self.assertNotIn("if the if access", corpus)
+        for required in (
+            "loop memory writes",
+            "promotion",
+            "migration",
+            "irreversible external side effects",
+            "trusted",
+            "loop state",
+            "read-only diagnosis",
+            "recoverable local work",
+        ):
+            self.assertIn(required, corpus)
+
 
 class ConfigurationMergeTests(unittest.TestCase):
     def setUp(self):

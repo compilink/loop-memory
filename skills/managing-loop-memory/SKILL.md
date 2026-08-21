@@ -21,8 +21,9 @@ product-memory storage; product memory remains opaque and complementary.
    cwd, worktree, or project change.
 2. If `environment_access_denied` returns typed `required_access`, ask the host
    for exactly `~/loop-memory` read and write access, then retry once. If the
-   request is refused, unsupported, changes path or modes, or the retry fails,
-   stop that operation without broadening access.
+   access is refused or retry fails, stop Loop Memory writes, promotion,
+   migration, and irreversible external side effects. Read-only
+   diagnosis and recoverable local work may continue; report the typed block.
 3. Require `ok=true`; honor every returned `capabilities` value and `degraded`
    notice by scope. An unrelated degraded capability does not disable an
    available one. Read only the smallest relevant returned paths. If

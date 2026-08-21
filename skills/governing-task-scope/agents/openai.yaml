@@ -1,0 +1,4 @@
+interface:
+  display_name: "Govern Task Scope"
+  short_description: "Keep long-running tasks aligned and bounded"
+  default_prompt: "Use $governing-task-scope to establish and enforce the current task contract."

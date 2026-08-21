@@ -1,87 +1,83 @@
 # AGENTS.md
 
-This file provides global methodology guidance for Codex, Claude Code, and other local agents on this machine.
-
-Use it for cross-repository working agreements. Keep repository `AGENTS.md` files focused on project-specific rules, verification commands, deployment constraints, and document indexes.
+This file defines cross-repository working agreements for local Agents. Keep
+repository `AGENTS.md` files focused on project rules, verification, deployment,
+and document indexes.
 
 ## Loop Engineering
 
-### Progressive Disclosure
+### Core method
 
-- Start with the smallest instruction and document set that can unblock the next useful step.
-- Read only the next relevant layer of guidance, context, code, tests, and config.
-- Promote durable lessons instead of expanding prompts or chat recaps.
+- Use progressive disclosure: read only the smallest guidance, context, code,
+  tests, and configuration that unblocks the next useful step.
+- For consequential or ambiguous work, separate verified facts, assumptions,
+  interpretations, and decisions; derive the smallest material invariants and
+  directly verifiable acceptance conditions from the objective and constraints.
+- Among paths that preserve those invariants, use Occam's razor: choose the
+  fewest unsupported assumptions, shortest useful path, lowest cost, and
+  smallest failure surface. Simplicity is not evidence; never discard facts,
+  safety, data integrity, compatibility, or expected answers merely to be
+  shorter.
 
-### First Principles and Occam's Razor
-
-- Use first-principles reasoning for consequential, ambiguous, or complex work; use proven conventions for routine decisions unless they hide material assumptions.
-- Start from the objective, constraints, and verified facts. Separate facts, assumptions, interpretations, and decisions; never treat preference or an untested belief as a first principle.
-- Decompose the problem into the smallest verifiable invariants, derive viable directions without being constrained by the current process or implementation, then use experience to validate and optimize.
-- Among solutions that preserve material facts and sufficient explanatory power, prefer the fewest unsupported assumptions, shortest execution path, lowest cost, and smallest failure surface. Remove work that does not serve the objective.
-- Simplicity is a selection rule, not evidence of truth. Do not over-simplify, discard a stronger complex explanation, guess across evidence gaps, or change expected answers merely to pass a gate.
-
-### Standard Loop
-
-Every meaningful work loop should follow:
+### Standard loop
 
 1. Read the relevant guidance and context.
-2. Think and plan the next useful step.
+2. Plan the next useful step.
 3. Act with focused edits or commands.
-4. Verify with the smallest command that directly proves the claim.
-5. Record durable learning when it will help a future loop.
-6. Leave a resumable handoff.
-
-Substantive work means work that changes durable state, spans multiple verifiable steps, may survive a context transition, or creates reusable learning. A direct answer or read-only check that changes none of these does not require a full persistence loop.
+4. Verify the claim with the smallest direct check.
+5. Record only durable learning.
+6. Leave a resumable handoff when state changed.
 
 ### Loop Memory
 
-- Use `managing-loop-memory` for every Loop Memory operation. Its only authority root is `~/loop-memory`; never create a repository fallback or redirect Loop state into product-memory storage.
-- Call its `enter` workflow with the actual host context before ordinary Loop operations and after compaction, resume, handoff, or a working-directory, worktree, or project change. If typed `required_access` is returned, request exactly `~/loop-memory` read/write and retry once.
-- Trust only returned identities, paths, `capabilities`, and notices. Continue through scope-specific degradation only with capabilities that remain true. Commentary, summaries, and remembered paths are not authoritative task state.
-- Codex product memory is complementary evidence and remains product-managed. The Loop skill neither inspects nor manages product memory internals.
-- Share project and worktree knowledge at project scope while isolating session and Agent state. Subagents submit evidence-backed candidates through their outbox; the main Agent verifies, accepts, and promotes them.
-- Treat session `status` as live state and `handoff` as a compaction, transfer, or close snapshot. Resolve all outboxes before `session-close`.
-- Treat external legacy sources as read-only; import may copy verified bytes into Loop custody but never rewrite or delete the source.
-- Keep `~/loop-memory/global/long.md` as the mandatory global context. It must contain only reusable methodology and the path `~/loop-memory/global/facts/index.md`; full global facts belong in content-addressed `global/facts/entries/` files, while the index carries concise summaries and exact locators.
-- On every task, `enter` validates the long-memory and fact-index invariants. A non-canonical or overfull long file returns the non-blocking `global_long_organization_due` notice. In that same task, prepare the canonical methodology and invoke `global-organize`; it archives the exact prior long file with a receipt and atomically publishes the concise form. This per-task convergence replaces periodic governance and never requires manual edits to Loop internals.
-- Use `doctor` to explain a typed block, not as a periodic correctness dependency.
-- Treat this file as the normative methodology source and global long-term Loop memory as durable rationale. Update both in one methodology loop; mark superseded rationale explicitly, and consolidate it only when canonical storage invariants allow.
+- Use `managing-loop-memory` for every Loop Memory operation. Its only authority
+  root is `~/loop-memory`; never create a repository or product-memory fallback.
+- Call `enter` with actual host context before ordinary operations and after
+  compaction, resume, handoff, or project changes. If typed access is denied,
+  request exactly `~/loop-memory` read/write and retry once; if it still fails,
+  stop Loop Memory writes, promotion, migration, and irreversible external
+  side effects; read-only diagnosis and recoverable local work may continue.
+- Trust only returned identities, paths, capabilities, notices, and status.
+  Continue through degradation only where the returned capability remains true.
+- Keep product memory complementary and product-managed. Share project facts
+  at project scope, isolate session/Agent state, and let the main Agent verify
+  shared promotion and resolve outboxes.
+- Keep `status` as live state and `handoff` as a compaction/transfer/close
+  snapshot. Treat external legacy sources as read-only evidence.
+- Keep `~/loop-memory/global/long.md` limited to reusable methodology and the
+  fact-index path. Store full global facts in content-addressed entries and
+  organize an overfull/non-canonical long file during the same task via the
+  returned `global-organize` action; do not edit Loop internals manually.
+- Use `doctor` to explain typed blocks, not as a periodic correctness gate.
+  Update this guidance and durable global rationale together when methodology
+  changes.
 
-### Read Order
+### Task Scope Governance
 
-At the start of substantive work:
+- Use `governing-task-scope` when a consequential task can drift in objective,
+  milestone, acceptance, scope, or Agent budget.
+- Persist its versioned contract in the resolved session and re-evaluate it at
+  execution proposals, delegation, milestone transitions, and completion.
+- User instructions and the applicable `AGENTS.md` chain outrank the contract;
+  automatic correction may not change objectives, erase evidence, or defer
+  security, data-integrity, or compatibility risks. The layer is workflow-
+  neutral; Superpowers is optional.
 
-1. Read this file, then the closest applicable repository `AGENTS.md`.
-2. Invoke `managing-loop-memory` `enter` with the actual current context and read only returned files whose capabilities permit the operation.
-3. Follow repository guidance for additional project documents and verification requirements.
-4. Read the smallest relevant code, tests, and config surface.
+### Subagent governance
 
-For normative conflicts, prefer the user request, then the closest applicable `AGENTS.md`, then broader methodology guidance. For factual conflicts, prefer direct runtime/test/config/code evidence, then current session evidence, verified project knowledge, and secondary documentation. Never let a lower-authority instruction override a higher-authority one, or let document authority substitute for factual evidence.
+- Before delegating, and while delegated Agents remain open, use
+  `governing-subagents`.
+- Main verifies evidence, accepts or rejects outboxes, and closes Agents
+  promptly. Stop fan-out and hand off when the task tree is unsafe or unknown.
 
-### Subagent Governance
+### Read order and completion
 
-- Before delegating work, and while any delegated Agent remains open, use `governing-subagents`.
-- Close delegated Agents promptly after accepting or rejecting their results.
-- When the skill reports an unsafe, unknown, or oversized task tree, stop further fan-out and hand off substantial work to a fresh top-level task.
+At substantive-task start: read this file, the closest repository guidance,
+then `enter`; read only returned paths permitted by capabilities before the
+smallest relevant project surface. For conflicts, prefer the user, then the
+closest `AGENTS.md`, then broader methodology; for facts, prefer direct runtime
+or test evidence over remembered summaries.
 
-### Progress and Write Discipline
-
-- Keep non-trivial progress, phase changes, waiting states, next actions, and handoff data in the resolved current session.
-- Update shared knowledge only when it will help a future loop. Keep entries dated, concise, evidence-backed, and free of secrets, credentials, raw customer data, and unnecessary PII.
-- If no durable learning or resumable state changed, no Loop memory write is required.
-- Put project facts in resolved project memory and reusable methodology in resolved global memory. Keep broader architecture, deployment, API, and business material in project documentation.
-- The main Agent owns shared promotion and must verify subagent evidence before accepting it.
-
-### Commentary Discipline
-
-- Spend time thinking before speaking.
-- Use commentary for useful milestones, blockers, and decisions rather than step-by-step narration.
-- Do not rely on commentary or chat history as the primary record of task state.
-
-### Completion Discipline
-
-Before claiming completion:
-
-- run the verification command that proves the current claim, or state why verification does not apply
-- update the relevant Loop memory or handoff when the task changed durable state
-- keep global guidance lean and move project detail into repository guidance and project docs
+Before claiming completion, run the command that proves the claim, update live
+status or handoff when durable state changed, and keep global guidance lean.
+Commentary records milestones and blockers, not primary task state.

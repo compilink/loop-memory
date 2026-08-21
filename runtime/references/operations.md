@@ -86,7 +86,11 @@ Access denial has this body-free shape:
 When the host supports access requests, request exactly the returned path and
 modes and retry `enter` once. Reject a changed path or broader request. If the
 request or retry fails, report the typed block; do not use elevated privilege,
-broaden access to `~/`, retry repeatedly, or create a fallback.
+broaden access to `~/`, retry repeatedly, or create a fallback. While the
+`enter` result remains blocked, do not write Loop Memory, promote, migrate, or
+take irreversible external side effects. Read-only diagnosis and recoverable
+local work may continue, but the Agent must not treat the current Loop state as
+trusted until `enter` succeeds.
 
 ## Capabilities and Paths
 
