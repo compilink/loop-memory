@@ -55,6 +55,24 @@ review the three Loop Memory lifecycle commands, and approve them once.
 
 Re-run `python3 install.py` to converge to the checked-out version.
 
+## Upgrade
+
+After updating an existing checkout, upgrade the installed Runtime, Skills,
+and managed Codex configuration with:
+
+```bash
+git pull --ff-only
+python3 install.py --upgrade
+```
+
+Upgrade requires an existing installer manifest. It verifies that the
+currently managed Runtime, launcher, and Skills have not been locally modified,
+then uses the same transactional publish, verification, and rollback path as
+installation. Missing managed targets are restored, newly introduced Skills
+can be added, and `~/loop-memory` is always preserved. If the result contains
+`codex_trust_review=required`, open `/hooks` in Codex and approve the changed
+lifecycle commands before treating hook acceptance as complete.
+
 ## Uninstall
 
 ```bash

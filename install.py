@@ -6,7 +6,7 @@ from dataclasses import dataclass
 import hashlib
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import re
 import shutil
 import subprocess
@@ -619,6 +619,75 @@ def _verify_removable_managed_files(
             raise InstallerError("managed_tree_modified", path)
 
 
+def _verify_upgrade_managed_files(
+    home: Path, manifest: dict[str, object]
+) -> None:
+    managed = manifest["managed"]
+    assert isinstance(managed, dict)
+    required = {
+        ".local/share/loop-memory",
+        ".local/bin/loop-memory",
+    }
+    if not required.issubset(managed):
+        raise InstallerError(
+            "manifest_invalid",
+            home / ".local/state/loop-memory-installer/manifest.json",
+        )
+    def is_guarded_skill(key: str) -> bool:
+        parts = PurePosixPath(key).parts
+        return (
+            len(parts) == 3
+            and parts[:2] == (".codex", "skills")
+            and parts[2] not in {"", ".", ".."}
+        )
+
+    guarded = sorted(
+        key
+        for key in managed
+        if key in required or is_guarded_skill(key)
+    )
+    for key in guarded:
+        metadata = managed.get(key)
+        path = home / key
+        if not isinstance(metadata, dict) or not isinstance(
+            metadata.get("sha256"), str
+        ):
+            raise InstallerError("manifest_invalid", path)
+        if not path.exists():
+            continue
+        kind = metadata.get("kind")
+        if kind == "tree":
+            if path.is_symlink() or not path.is_dir():
+                raise InstallerError("managed_tree_modified", path)
+            actual = tree_digest(path)
+            error_code = "managed_tree_modified"
+        elif kind == "file":
+            if path.is_symlink() or not path.is_file():
+                raise InstallerError("managed_file_modified", path)
+            actual = file_digest(path)
+            error_code = "managed_file_modified"
+        else:
+            raise InstallerError("manifest_invalid", path)
+        if actual != metadata["sha256"]:
+            raise InstallerError(error_code, path)
+
+
+def run_upgrade(home: Path) -> dict[str, object]:
+    home = home.resolve()
+    manifest_path = home / ".local/state/loop-memory-installer/manifest.json"
+    if not manifest_path.is_file() or manifest_path.is_symlink():
+        raise InstallerError("upgrade_requires_installation", manifest_path)
+    manifest = _load_manifest(home)
+    _verify_upgrade_managed_files(home, manifest)
+    result = run_install(home)
+    return {
+        "ok": True,
+        "changed": result["changed"],
+        "memory_preserved": True,
+        "codex_trust_review": result["codex_trust_review"],
+    }
+
+
 def stage_uninstall(home: Path, stage: Path) -> tuple[list[Target], list[Path]]:
     manifest = _load_manifest(home)
     _verify_removable_managed_files(home, manifest)
@@ -706,7 +775,9 @@ def _parse_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Install Loop Memory for the current Codex user."
     )
-    parser.add_argument("--uninstall", action="store_true")
+    actions = parser.add_mutually_exclusive_group()
+    actions.add_argument("--upgrade", action="store_true")
+    actions.add_argument("--uninstall", action="store_true")
     return parser.parse_args()
 
 
@@ -726,6 +797,14 @@ def main() -> int:
                 "OK action=uninstall changed="
                 + str(result["changed"]).lower()
                 + " memory_preserved=true"
+            )
+        elif arguments.upgrade:
+            result = run_upgrade(home)
+            print(
+                "OK action=upgrade changed="
+                + str(result["changed"]).lower()
+                + " memory_preserved=true codex_trust_review="
+                + str(result["codex_trust_review"])
             )
         else:
             result = run_install(home)

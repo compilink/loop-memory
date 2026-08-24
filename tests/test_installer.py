@@ -1,5 +1,6 @@
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -244,6 +245,99 @@ class UninstallTests(unittest.TestCase):
             self.assertTrue(changed.is_file())
 
 
+class UpgradeTests(unittest.TestCase):
+    def test_upgrade_requires_an_existing_installation(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            home = Path(temporary) / "home"
+            home.mkdir()
+            with self.assertRaisesRegex(
+                install.InstallerError,
+                "upgrade_requires_installation",
+            ):
+                install.run_upgrade(home)
+
+    def test_upgrade_is_idempotent_and_preserves_memory(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            home = Path(temporary) / "home"
+            home.mkdir()
+            install.run_install(home)
+            sentinel = home / "loop-memory/sentinel"
+            sentinel.write_text("keep", encoding="utf-8")
+            result = install.run_upgrade(home)
+            self.assertFalse(result["changed"])
+            self.assertTrue(result["memory_preserved"])
+            self.assertEqual(sentinel.read_text(encoding="utf-8"), "keep")
+
+    def test_upgrade_restores_a_missing_managed_target(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            home = Path(temporary) / "home"
+            home.mkdir()
+            install.run_install(home)
+            launcher = home / ".local/bin/loop-memory"
+            launcher.unlink()
+            result = install.run_upgrade(home)
+            self.assertTrue(result["changed"])
+            self.assertTrue(launcher.is_file())
+
+    def test_upgrade_accepts_a_manifest_from_before_a_new_skill_was_added(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            home = Path(temporary) / "home"
+            home.mkdir()
+            install.run_install(home)
+            manifest_path = (
+                home / ".local/state/loop-memory-installer/manifest.json"
+            )
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            del manifest["managed"][".codex/skills/governing-task-scope"]
+            manifest_path.write_text(
+                json.dumps(manifest, indent=2, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+            skill = home / ".codex/skills/governing-task-scope"
+            shutil.rmtree(skill)
+            result = install.run_upgrade(home)
+            self.assertTrue(result["changed"])
+            self.assertTrue(skill.is_dir())
+
+    def test_upgrade_preserves_user_config_changes_and_refreshes_manifest(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            home = Path(temporary) / "home"
+            home.mkdir()
+            install.run_install(home)
+            config = home / ".codex/config.toml"
+            config.write_text(
+                'model = "user-choice"\n' + config.read_text(encoding="utf-8"),
+                encoding="utf-8",
+            )
+            first = install.run_upgrade(home)
+            second = install.run_upgrade(home)
+            self.assertTrue(first["changed"])
+            self.assertFalse(second["changed"])
+            self.assertIn(
+                'model = "user-choice"',
+                config.read_text(encoding="utf-8"),
+            )
+
+    def test_upgrade_refuses_a_modified_managed_tree_before_writes(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            home = Path(temporary) / "home"
+            home.mkdir()
+            install.run_install(home)
+            agents_before = (home / ".codex/AGENTS.md").read_bytes()
+            changed = home / ".codex/skills/managing-loop-memory/local.md"
+            changed.write_text("local modification\n", encoding="utf-8")
+            with self.assertRaisesRegex(
+                install.InstallerError,
+                "managed_tree_modified",
+            ):
+                install.run_upgrade(home)
+            self.assertEqual(
+                (home / ".codex/AGENTS.md").read_bytes(),
+                agents_before,
+            )
+            self.assertTrue(changed.is_file())
+
+
 class CliTests(unittest.TestCase):
     def run_cli(
         self, home: Path, *arguments: str
@@ -285,6 +379,27 @@ class CliTests(unittest.TestCase):
                 "OK action=uninstall changed=true memory_preserved=true\n",
             )
             self.assertTrue((home / "loop-memory").is_dir())
+
+    def test_cli_upgrade_returns_safe_summary(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            home = Path(temporary) / "home"
+            home.mkdir()
+            self.assertEqual(self.run_cli(home).returncode, 0)
+            completed = self.run_cli(home, "--upgrade")
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            self.assertEqual(
+                completed.stdout,
+                "OK action=upgrade changed=false memory_preserved=true "
+                "codex_trust_review=unchanged\n",
+            )
+            self.assertNotIn(str(home), completed.stdout + completed.stderr)
+
+    def test_cli_upgrade_and_uninstall_are_mutually_exclusive(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            home = Path(temporary) / "home"
+            home.mkdir()
+            completed = self.run_cli(home, "--upgrade", "--uninstall")
+            self.assertEqual(completed.returncode, 2)
 
     def test_verification_failure_restores_installer_owned_files(self):
         with tempfile.TemporaryDirectory() as temporary:
