@@ -53,6 +53,20 @@ When a selected path deliberately accepts a known limit, add it to
 reconsideration trigger. This metadata is not a separate debt system and does
 not schedule cleanup.
 
+## Incremental Work Gate
+
+Before admitting a work item at `execution-proposal`, tie it to a pending
+acceptance item or invariant, name the verified root cause it addresses, and
+state the smallest direct verification and stop condition. Re-check existing
+implementation, standard library, platform-native capability, and installed
+dependency first. If an item changes input, state, or acceptance semantics, it
+is separate work; if current acceptance is satisfied, stop and complete. When
+evidence changes the objective, acceptance semantics, or authorized change
+surface, record a finding and handoff, then create a new contract version
+instead of extending the current work. A failure outside the authorized change
+surface is evidence to classify and hand off, not permission to widen
+implementation.
+
 ## Gate Boundaries
 
 Invoke the script by its resolved absolute path:

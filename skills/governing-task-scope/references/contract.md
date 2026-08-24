@@ -50,6 +50,13 @@ Each entry is only decision metadata and requires a unique ID, summary, current
 ceiling, and evidence-based trigger. It does not schedule work or authorize
 automatic cleanup.
 
+`decision.selected_path` records the minimal solution path and may summarize the
+solution-ladder evidence. Use `scope.forbidden` for unrequested flexibility,
+alternate paths, and unrelated refactors. Every work item must support the
+current milestone constraints; a changed objective, acceptance meaning, or
+authorized change surface requires a new contract version rather than an
+extension of the current work.
+
 Findings use `risk_category` `security`, `data-integrity`, `compatibility`, or
 `ordinary`, plus disposition `block`, `fix-now`, or `defer`. The first three
 categories cannot be deferred. Artifact entries contain `kind`, `path`,

@@ -41,6 +41,45 @@ class SkillContractTests(unittest.TestCase):
         self.assertIn("reconsideration trigger", self.skill_lower)
         self.assertIn("not a separate debt", self.skill_lower)
 
+    def test_skill_requires_solution_ladder_and_scope_delta_stop(self):
+        for phrase in (
+            "existing implementation",
+            "standard library",
+            "platform-native",
+            "installed dependency",
+            "acceptance",
+            "verified root cause",
+            "stop",
+            "new contract version",
+        ):
+            self.assertIn(phrase, self.skill_flat)
+
+    def test_global_agents_keeps_solution_ladder_and_reopen_rule_thin(self):
+        flat = re.sub(r"\s+", " ", self.global_agents.lower())
+        for phrase in (
+            "existing implementation",
+            "standard library",
+            "platform-native",
+            "installed dependency",
+            "stop",
+            "new contract version",
+        ):
+            self.assertIn(phrase, flat)
+
+    def test_global_agents_has_no_wrapped_paragraph_lines(self):
+        self.assertFalse(
+            [line for line in self.global_agents.splitlines() if line.startswith((" ", "\t"))]
+        )
+
+    def test_global_agents_and_long_memory_have_distinct_roles(self):
+        methodology = (REPO_ROOT / "global" / "global-long-methodology.md").read_text(
+            encoding="utf-8"
+        )
+        self.assertNotIn("Evidence:", self.global_agents)
+        self.assertNotIn("[verified]", self.global_agents)
+        self.assertIn("compact executable trigger layer", methodology)
+        self.assertIn("durable rationale and method summaries", methodology)
+
     def test_skill_uses_enter_returned_status_and_public_session_write(self):
         for phrase in (
             "managing-loop-memory",
