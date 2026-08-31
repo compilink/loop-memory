@@ -7,58 +7,55 @@ description: Use when an Agent needs to initialize, locate, read, update, migrat
 
 ## Boundary
 
-Use the shared `loop-memory` CLI. Its only authority root is
-`~/loop-memory`, shared by local Agents running as the same operating-system
-user. Trust only identities, capabilities, notices, and paths returned by the
-CLI. Never create a repository fallback or redirect Loop state into
-product-memory storage; product memory remains opaque and complementary.
+Use the shared `loop-memory` CLI. Its only authority root is `~/loop-memory`,
+shared by Agents of the same operating-system user. Trust only returned
+identities, capabilities, notices, and paths. Never create a repository
+fallback or redirect Loop state into product memory.
 
-## Hot Path
+## Entry and recovery
 
-1. Call `enter` with the actual cwd, host session ID, optional host-known
-   project root, and the current subagent ID when applicable. Do this before
-   each ordinary operation and again after resume, compaction, handoff, or a
-   cwd, worktree, or project change.
-2. If `environment_access_denied` returns typed `required_access`, ask the host
-   for exactly `~/loop-memory` read and write access, then retry once. If the
-   access is refused or retry fails, stop Loop Memory writes, promotion,
-   migration, and irreversible external side effects. Read-only
-   diagnosis and recoverable local work may continue; report the typed block.
-3. Require `ok=true`; honor every returned `capabilities` value and `degraded`
-   notice by scope. An unrelated degraded capability does not disable an
-   available one. Read only the smallest relevant returned paths. If
-   `session_memory_reinitialized` is returned, continue with the returned
-   empty session paths; the old working state was already unrecoverable.
-4. Write through `session-write` or `promote`, then verify the direct result.
-   Keep `status` as live state and `handoff` as a compaction, transfer, or close
-   snapshot. Do not write when no durable learning or resumable state changed.
-5. On every task, let `enter` validate the canonical global long-memory shape
-   and fact index. If it reports `global_long_organization_due`, keep reading
-   the returned `global/long.md` (global read remains available), then prepare
-   a canonical methodology file and run `global-organize` in the same task.
-   This archives the exact previous long file and publishes the concise form;
-   it is an actionable convergence hint, not a periodic scheduler.
-6. Use `doctor` only to explain notices or recovery; never repair internal
-   files manually.
+1. Call `enter` with actual cwd, host session ID, optional project root, and
+   subagent ID. Repeat after resume, compaction, handoff, cwd/worktree change,
+   and before the first write or close.
+2. Require `ok=true` and read only capability-authorized paths. For typed
+   `environment_access_denied`, request exactly the returned `~/loop-memory`
+   read/write access and retry once. If recovery fails, stop Loop writes,
+   promotion, migration, and irreversible side effects; diagnosis and
+   recoverable local work may continue. Treat degradation by scope.
 
-## Ownership and Judgment
+## Memory layers and progressive disclosure
 
-- External legacy sources are read-only. The CLI may copy verified bytes into
-  Loop custody, but no Loop workflow rewrites or deletes the external source.
-- The main Agent owns shared status, handoff, promotion, and subagent inboxes.
-  A subagent reads its inbox and writes only its own outbox. Main verifies each
-  candidate; each actor clears only its own resolved outbox. Resolve all
-  outboxes before `session-close`.
-- Promote project or global knowledge only when evidence and the returned
-  capability support it. Conflicts, suspected credentials, deletion of unique
-  evidence, and unauthorized methodology changes require a human decision.
-- Keep `~/loop-memory/global/long.md` as the mandatory global context: it holds
-  methodology and a pointer to `~/loop-memory/global/facts/index.md`, not the
-  full global fact bodies. Promote a verified fact with `--scope global-fact`;
-  the CLI stores its content under `global/facts/entries/` and adds only a
-  summary, locator, and digest to the index.
-- Update global `AGENTS.md` and global long-term rationale in one methodology
-  loop; mark superseded rationale instead of duplicating it.
+Keep layers small and non-overlapping:
+
+- `global/long.md` is mandatory methodology plus the fact-index pointer;
+  complete global facts live in the indexed archive. Global medium is
+  provisional cross-project rationale; global short is compatibility-only.
+- `project/long.md`, `project/medium.md`, and `project/short.md` hold overall
+  goals and durable facts, current-phase goals/facts, and current-task
+  goals/progress. A returned legacy `project.md` is only a compatibility
+  aggregate.
+- Session `status.md` is live resumable state; `handoff.md` is the compact
+  compaction/transfer/close snapshot. Inbox/outbox files are coordination state.
+
+For ordinary work, read project `short.md`, then `medium.md`, then `long.md`.
+For progress review, completion, or correction, read `long.md`, then `medium.md`,
+then `short.md`. Read full fact bodies only after an index summary and locator
+show relevance.
+
+## Writing and lifecycle
+
+- Write only for durable change: milestone, blocker, handoff, compaction, or
+  close. Keep checkpoints short (goal, done, next, blocker, evidence); do not
+  copy conversation or internal reasoning.
+- Write through the CLI; verify `exit=0`, `ok=true`, identity, and returned path
+  or change. Reject empty/template-only or oversized bodies, skip unchanged
+  writes, and lazily create scoped files on first meaningful write.
+- Promote evidence-backed knowledge only. Keep inference in the medium layer or
+  current outbox; the main Agent verifies each promotion candidate and resolves
+  outboxes. External legacy sources are read-only.
+- Use `doctor` for typed notices; never repair Loop internals manually. If
+  `enter` returns `global_long_organization_due`, run `global-organize` in the
+  same task.
 
 Read [references/operations.md](references/operations.md) for command syntax,
-JSON contracts, capabilities, legacy handling, lifecycle, and diagnosis.
+contracts, capabilities, migration, lifecycle, and diagnosis.

@@ -6,6 +6,7 @@ import unittest
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SKILL_ROOT = REPO_ROOT / "skills" / "governing-task-scope"
 SKILL_PATH = SKILL_ROOT / "SKILL.md"
+MEMORY_SKILL_PATH = REPO_ROOT / "skills" / "managing-loop-memory" / "SKILL.md"
 OPENAI_PATH = SKILL_ROOT / "agents" / "openai.yaml"
 GLOBAL_AGENTS = REPO_ROOT / "global" / "AGENTS.loop-engineering.md"
 
@@ -16,6 +17,8 @@ class SkillContractTests(unittest.TestCase):
         cls.skill = SKILL_PATH.read_text(encoding="utf-8")
         cls.skill_lower = cls.skill.lower()
         cls.skill_flat = re.sub(r"\s+", " ", cls.skill_lower)
+        cls.memory_skill = MEMORY_SKILL_PATH.read_text(encoding="utf-8")
+        cls.memory_skill_lower = cls.memory_skill.lower()
         cls.openai = OPENAI_PATH.read_text(encoding="utf-8")
         cls.global_agents = GLOBAL_AGENTS.read_text(encoding="utf-8")
 
@@ -56,15 +59,10 @@ class SkillContractTests(unittest.TestCase):
 
     def test_global_agents_keeps_solution_ladder_and_reopen_rule_thin(self):
         flat = re.sub(r"\s+", " ", self.global_agents.lower())
-        for phrase in (
-            "existing implementation",
-            "standard library",
-            "platform-native",
-            "installed dependency",
-            "stop",
-            "new contract version",
-        ):
-            self.assertIn(phrase, flat)
+        self.assertIn("managing-loop-memory", flat)
+        self.assertIn("governing-task-scope", flat)
+        self.assertNotIn("existing implementation", flat)
+        self.assertNotIn("scope_guard.py", flat)
 
     def test_global_agents_has_no_wrapped_paragraph_lines(self):
         self.assertFalse(
@@ -126,19 +124,31 @@ class SkillContractTests(unittest.TestCase):
         self.assertNotIn("required sub-skill", self.skill_lower)
 
     def test_global_agents_is_thin_trigger(self):
-        match = re.search(
-            r"^### Task Scope Governance\n(?P<body>.*?)(?=^### |\Z)",
-            self.global_agents,
-            re.MULTILINE | re.DOTALL,
-        )
-        self.assertIsNotNone(match)
-        section = match.group("body")
-        bullets = [line for line in section.splitlines() if line.startswith("- ")]
-        self.assertLessEqual(len(bullets), 5)
-        self.assertIn("`governing-task-scope`", section)
-        self.assertIn("workflowneutral", re.sub(r"[^a-z]", "", section.lower()))
-        for forbidden in ("schema_version", "scope_guard.py", "contract_ref", "ponytail"):
-            self.assertNotIn(forbidden, section.lower())
+        self.assertLessEqual(len(self.global_agents.splitlines()), 24)
+        for section in ("Loop Memory", "Task Scope"):
+            self.assertIn(section, self.global_agents)
+        self.assertNotIn("Subagent governance", self.global_agents)
+
+    def test_managing_skill_defines_project_horizons_and_read_order(self):
+        for phrase in (
+            "project/long.md",
+            "project/medium.md",
+            "project/short.md",
+            "short.md",
+            "medium.md",
+            "long.md",
+            "progressive disclosure",
+            "progress review",
+        ):
+            self.assertIn(phrase.lower(), self.memory_skill_lower)
+
+    def test_governing_subagents_is_host_neutral_and_optional(self):
+        path = REPO_ROOT / "skills" / "governing-subagents" / "SKILL.md"
+        text = path.read_text(encoding="utf-8").lower()
+        self.assertIn("host-native", text)
+        self.assertIn("supplement", text)
+        self.assertNotIn("at most 8", text)
+        self.assertNotIn("45", text)
 
     def test_openai_yaml_declares_no_tool_dependencies(self):
         self.assertIn("interface:", self.openai)

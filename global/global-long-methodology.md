@@ -22,6 +22,10 @@
   Evidence: review of a multi-step integration iteration and governing-task-scope contract design.
 - [2026-08-24][verified] `AGENTS.md` is the compact executable trigger layer; global long memory stores durable rationale and method summaries, while project and session memory store scoped facts and resumable state. They should evolve together without duplicating each other's operational detail.
   Evidence: global memory shape and installer source-of-truth review.
+- [2026-08-31][verified] Keep memory horizons distinct: global long holds reusable methodology, project long/medium/short hold overall, phase, and current-task context, and ordinary reads proceed short to medium to long; progress review proceeds long to medium to short.
+  Evidence: approved memory-layer responsibility review and managing-loop-memory skill contract.
+- [2026-08-31][verified] Subagent governance is a host-neutral supplement: rely on Codex or another host's authoritative task-tree state and do not duplicate its scheduler or capacity limits.
+  Evidence: governing-subagents compatibility review and skill contract.
 
 ## Fact Index
 

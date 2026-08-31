@@ -1,42 +1,37 @@
 ---
 name: governing-subagents
-description: Use when Codex is about to delegate work, has open or completed subagents to disposition, resumes a task with historical descendants, or must control subagent count, reuse, closure, handoff, or task-tree growth.
+description: Use when delegation, open descendants, historical descendants, or subagent result disposition needs governance beyond the host's native task-tree controls.
 ---
 
 # Governing Subagents
 
-Use this governance gate before each delegation batch and while any delegated Agent remains open. It overrides a workflow that would otherwise grow the current task tree unsafely.
+This is a host-neutral supplement, not a replacement for Codex or another
+host's host-native task and concurrency controls. Use it only when delegation or
+result disposition is in scope and the host does not already provide the
+needed authoritative state.
 
-## Audit the Tree
+## Before delegation
 
-1. Inventory the full known task tree with the host's Agent and task-state tools. Classify each descendant as running, waiting, completed, closed, archived, or unknown/unreadable. UI activity labels are hints, not authoritative state.
-2. Count open Agents separately from cumulative descendants. Closing an Agent releases concurrency but does not erase descendant history.
-3. Preserve unknown or unreadable work. Do not clean it up destructively, and create no new Agents until its state or a reliable conservative count is established.
+1. Inspect the host-provided task tree and classify descendants as running,
+   waiting, completed, closed, archived, or unknown. UI labels are hints only.
+2. Prefer no delegation for small or tightly coupled work. Reuse existing
+   Agents when the host permits it. Do not invent fixed capacity numbers or a
+   second scheduler; follow the host's reported limits and user instructions.
+3. If tree state or limits are unknown, stop new fan-out and leave a concise
+   handoff until the host can provide authoritative state.
 
-## Gate Delegation
+## While Agents are open
 
-- Keep at most 8 delegated Agents open concurrently.
-- Treat 40 cumulative descendants as a warning, 45 as the fan-out stop threshold, and 50 as a hard ceiling that the workflow must never approach or cross.
-- Before starting a task, reserve its full plausible Agent budget: implementer, planned reviewers, and likely repair and re-review work. If the conservative worst-case total would reach 45, do not start it in this tree; hand off first.
-- Prefer no delegation when the work is small or tightly coupled. Reuse the same implementer for fixes and the same relevant reviewer for re-review. Do not create new Agents for correction loops merely to follow a template.
+- The main Agent verifies evidence, accepts or rejects results, and closes
+  Agents through host-native controls as soon as they are no longer needed.
+- When Loop Memory is used, apply `managing-loop-memory` ownership rules:
+  subagents write only their own outbox, and the main Agent resolves shared
+  state. Never treat a parent prompt or chat summary as authoritative state.
+- Preserve unknown or unreadable work. Do not delete or archive task history
+  without explicit authority.
 
-## Accept and Close
+## Boundary
 
-For each result:
-
-1. Verify the result and cited evidence.
-2. If Loop Memory is available, disposition the Agent outbox through `managing-loop-memory`; if unavailable, record the limitation without bypassing its safety gate.
-3. Accept or reject the result, then close the Agent immediately when it is no longer needed.
-
-Do not close Agents solely because the UI looks inactive. Do not delete or archive historical tasks without explicit authority.
-
-## Stop and Hand Off
-
-When the count is unsafe, unknown, or the reserved budget reaches the stop threshold:
-
-1. Stop further fan-out.
-2. Integrate usable current results and close verified terminal children.
-3. Leave a concise, resumable handoff with objective, verified state, evidence, remaining work, and risks.
-4. Request or create a fresh top-level task only when the user has granted the required authority.
-
-Apply this gate before `subagent-driven-development` or similar delegation workflows; their normal fan-out must yield to these limits.
+If the host already enforces delegation count, closure, or handoff, this skill
+adds no duplicate gate. It must not override host behavior, change objectives,
+or widen the authorized work surface.

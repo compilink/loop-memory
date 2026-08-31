@@ -4,6 +4,7 @@ import subprocess
 import sys
 import unittest
 from unittest import mock
+import tempfile
 
 
 RUNTIME = Path(__file__).resolve().parents[1]
@@ -249,6 +250,62 @@ class AdapterContractTests(unittest.TestCase):
             output = claude_hook.handle(self.load("claude-session-start.json"))
         self.assertEqual(output["warning"]["code"], "adapter_timeout")
         self.assertLess(len(json.dumps(output)), 1000)
+
+    def test_session_start_injects_bounded_hot_memory_capsule(self):
+        from adapters import common
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            global_long = root / "long.md"
+            status = root / "status.md"
+            handoff = root / "handoff.md"
+            global_long.write_text("# Global Long-Term Memory\n\nMethod\n", encoding="utf-8")
+            status.write_text("Goal: continue\nNext: verify\n", encoding="utf-8")
+            handoff.write_text("handoff\n", encoding="utf-8")
+            payload = {
+                "project_id": "p1", "session_id": "s1",
+                "capabilities": {"global_read": True, "session_read": True},
+                "notices": [],
+                "paths": {
+                    "global_long": str(global_long),
+                    "status": str(status),
+                    "handoff": str(handoff),
+                },
+            }
+            rendered = json.loads(
+                common._additional_context(
+                    payload,
+                    common.HostEvent(
+                        "SessionStart", "s1", str(root), source="compact"
+                    ),
+                )
+            )
+            capsule = rendered["loop_memory"]["hot_memory"]
+            self.assertEqual(capsule["global_long"], global_long.read_text())
+            self.assertEqual(capsule["status"], status.read_text())
+            self.assertEqual(capsule["handoff"], handoff.read_text())
+
+    def test_session_start_hot_memory_excludes_handoff_on_fresh_start(self):
+        from adapters import common
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            long_path = root / "long.md"
+            handoff_path = root / "handoff.md"
+            long_path.write_text("method\n", encoding="utf-8")
+            handoff_path.write_text("old\n", encoding="utf-8")
+            payload = {
+                "capabilities": {"global_read": True, "session_read": True},
+                "notices": [],
+                "paths": {"global_long": str(long_path), "handoff": str(handoff_path)},
+            }
+            rendered = json.loads(
+                common._additional_context(
+                    payload,
+                    common.HostEvent("SessionStart", "s1", str(root), source="startup"),
+                )
+            )
+            self.assertNotIn("handoff", rendered["loop_memory"]["hot_memory"])
 
 
 if __name__ == "__main__":

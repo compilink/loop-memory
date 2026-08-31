@@ -7,6 +7,8 @@ paths.
 
 from dataclasses import dataclass
 import json
+import os
+import stat
 import subprocess
 from typing import Callable, Mapping, Sequence
 
@@ -20,6 +22,9 @@ _PATH_CAPABILITIES = {
     "global_medium": "global_read",
     "global_short": "global_read",
     "project_memory": "project_read",
+    "project_long": "project_read",
+    "project_medium": "project_read",
+    "project_short": "project_read",
     "status": "session_read",
     "handoff": "session_read",
     "agent_inbox": "session_read",
@@ -29,6 +34,8 @@ _CAPABILITY_KEYS = (
     "global_read", "global_promote", "project_read", "project_promote",
     "session_read", "session_write", "session_close", "migration_apply",
 )
+_HOT_MEMORY_LIMIT = 4096
+_HOT_MEMORY_TOTAL_LIMIT = 12000
 
 
 class HostEventError(ValueError):
@@ -115,7 +122,38 @@ def _run_json(
     return completed, value
 
 
-def _additional_context(payload: Mapping[str, object]) -> str:
+def _read_hot_memory(path: object, budget: int) -> str | None:
+    if not isinstance(path, str) or budget <= 0:
+        return None
+    try:
+        descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+    except OSError:
+        return None
+    try:
+        metadata = os.fstat(descriptor)
+        if not stat.S_ISREG(metadata.st_mode) or metadata.st_size > budget:
+            return None
+        chunks: list[bytes] = []
+        remaining = budget
+        while remaining:
+            chunk = os.read(descriptor, remaining)
+            if not chunk:
+                break
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        try:
+            return b"".join(chunks).decode("utf-8")
+        except UnicodeDecodeError:
+            return None
+    except OSError:
+        return None
+    finally:
+        os.close(descriptor)
+
+
+def _additional_context(
+    payload: Mapping[str, object], event: HostEvent | None = None
+) -> str:
     raw_capabilities = payload.get("capabilities")
     capabilities = {
         key: raw_capabilities[key]
@@ -151,6 +189,28 @@ def _additional_context(payload: Mapping[str, object]) -> str:
             value = paths.get(name)
             if capabilities.get(capability) is True and isinstance(value, str):
                 selected[name] = value
+    hot_memory: dict[str, str] = {}
+    remaining = _HOT_MEMORY_TOTAL_LIMIT
+    session_start = event is None or event.event_name == "SessionStart"
+    if session_start and capabilities.get("global_read") is True:
+        body = _read_hot_memory(paths.get("global_long") if isinstance(paths, dict) else None, min(_HOT_MEMORY_LIMIT, remaining))
+        if body is not None:
+            hot_memory["global_long"] = body
+            remaining -= len(body.encode("utf-8"))
+    if session_start and capabilities.get("project_read") is True and remaining:
+        body = _read_hot_memory(paths.get("project_short") if isinstance(paths, dict) else None, min(_HOT_MEMORY_LIMIT, remaining))
+        if body is not None:
+            hot_memory["project_short"] = body
+            remaining -= len(body.encode("utf-8"))
+    if session_start and capabilities.get("session_read") is True and remaining:
+        body = _read_hot_memory(paths.get("status") if isinstance(paths, dict) else None, min(_HOT_MEMORY_LIMIT, remaining))
+        if body is not None:
+            hot_memory["status"] = body
+            remaining -= len(body.encode("utf-8"))
+        if event is not None and event.source in {"resume", "compact"}:
+            body = _read_hot_memory(paths.get("handoff") if isinstance(paths, dict) else None, min(_HOT_MEMORY_LIMIT, remaining))
+            if body is not None:
+                hot_memory["handoff"] = body
     resume_handoff = payload.get("resume_handoff")
     if capabilities.get("session_read") is True and isinstance(resume_handoff, str):
         selected["resume_handoff"] = resume_handoff
@@ -161,6 +221,8 @@ def _additional_context(payload: Mapping[str, object]) -> str:
         "notices": notices,
         "context_paths": selected,
     }
+    if hot_memory:
+        context["hot_memory"] = hot_memory
     return json.dumps(
         {"loop_memory": context},
         separators=(",", ":"),
@@ -172,7 +234,7 @@ def _success_output(event: HostEvent, payload: Mapping[str, object]) -> dict[str
     return {
         "hookSpecificOutput": {
             "hookEventName": event.event_name,
-            "additionalContext": _additional_context(payload),
+            "additionalContext": _additional_context(payload, event),
         }
     }
 

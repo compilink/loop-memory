@@ -314,7 +314,7 @@ class ConvergenceCliTests(unittest.TestCase):
             self.assertEqual((new / "root.json").read_bytes(), new_before)
             self.assertFalse((new / "projects").exists())
 
-    def test_missing_empty_templates_and_complete_conversion_journal_repair(self):
+    def test_missing_lazy_session_file_remains_absent_on_enter(self):
         with tempfile.TemporaryDirectory() as temp:
             home = Path(temp).resolve()
             project = home / "project"
@@ -322,10 +322,12 @@ class ConvergenceCliTests(unittest.TestCase):
             root = home / "loop"
             first = self.payload(self.run_cli("enter", "--cwd", project, "--session-id", "host", "--root", root, "--json", home=home))
             status = Path(first["paths"]["status"])
+            status.parent.mkdir(parents=True, exist_ok=True)
+            status.write_text("# Session Status\nwork\n", encoding="utf-8")
             status.unlink()
-            repaired = self.payload(self.run_cli("enter", "--cwd", project, "--session-id", "host", "--root", root, "--json", home=home))
-            self.assertTrue(repaired["ok"])
-            self.assertEqual(status.read_text(), "# Session Status\n")
+            entered = self.payload(self.run_cli("enter", "--cwd", project, "--session-id", "host", "--root", root, "--json", home=home))
+            self.assertTrue(entered["ok"])
+            self.assertFalse(status.exists())
             self.assertFalse((root / "root.transaction.json").exists())
 
     def test_expired_provably_dead_registry_lock_is_repaired(self):
@@ -481,7 +483,8 @@ class EnterOrderingTests(unittest.TestCase):
                 first = scan.call_count
                 cli._identity_preflight(root, str(cwd), "host", None)
                 self.assertEqual(scan.call_count, first)
-                status = next((root / "projects").glob("*/sessions/active/*/status.md"))
+                session = next((root / "projects").glob("*/sessions/active/*"))
+                status = session / "status.md"
                 status.write_text("# Session Status\nchanged\n")
                 cli._identity_preflight(root, str(cwd), "host", None)
                 self.assertGreater(scan.call_count, first)

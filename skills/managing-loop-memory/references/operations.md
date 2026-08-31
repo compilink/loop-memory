@@ -118,6 +118,12 @@ integrity failure returns `ok=false` and stops the affected operation.
 An `other-project` notice is diagnostic only for the current task and must not
 disable capabilities that the returned current scope marks true.
 
+The returned project paths include `project_long`, `project_medium`, and
+`project_short` for the explicit project horizons. `project_memory` remains the
+backward-compatible aggregate path for older data. Horizon files are created
+when first used; a missing horizon is an empty scope, not a reason to read the
+aggregate file twice.
+
 ## Session Writes and Promotion
 
 Supply bodies through regular non-symlink UTF-8 files:
@@ -130,7 +136,7 @@ loop-memory session-write \
 
 loop-memory promote \
   --cwd PATH --thread-id ID \
-  --scope project|global-long|global-medium|global-fact \
+  --scope project|project-long|project-medium|project-short|global-long|global-medium|global-fact \
   --section NAME --input FILE --json
 ```
 
@@ -147,13 +153,20 @@ its exact required capability. Legacy staging, migration, diagnosis, and
 maintenance follow their own returned next-action and integrity contracts;
 they are not described as a single identity gate. Verify exit `0`, `ok=true`,
 the returned identity, and the direct result (`path` or `changed`).
-Project/global-long entries are evidence-backed `verified` or
+Project-long/global-long entries are evidence-backed `verified` or
 `superseded` knowledge; inference belongs in global-medium or the current
 outbox. Never include secrets, credentials, raw customer data, or unnecessary
 personal data.
 The compatibility `global/short.md` layer remains readable for migrated data
 but is deprecated for new writes; current short-lived state belongs in the
 active session.
+
+Session writes are bounded to 16 KiB, reject whitespace-only and first-use
+template-only bodies, and are a byte-for-byte no-op when unchanged. The runtime
+may create the active session directory during `enter`, but it creates status,
+handoff, inbox, and outbox files only after a meaningful write.
+An absent outbox file therefore means no candidate; malformed agent directories
+still block close or cleanup.
 
 ## Global long-memory organization
 

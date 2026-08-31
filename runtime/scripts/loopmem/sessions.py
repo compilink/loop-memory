@@ -40,6 +40,11 @@ _PROJECT_TEMPLATE = (
     "\n"
     "## Superseded\n"
 )
+_PROJECT_HORIZON_TEMPLATES = {
+    "long": "# Project Long-Term Memory\n\n## Entries\n",
+    "medium": "# Project Medium-Term Memory\n\n## Entries\n",
+    "short": "# Project Short-Term Memory\n\n## Entries\n",
+}
 _SESSION_TEMPLATES = {
     "status.md": "# Session Status\n",
     "handoff.md": "# Session Handoff\n",
@@ -55,9 +60,20 @@ _ENTRY_FIRST_LINE = re.compile(
     r"\[(verified|inferred|superseded)\] (\S.*)$"
 )
 _TRAILING_HORIZONTAL_SPACE = re.compile(r"[ \t]+$")
-_VALID_SCOPES = frozenset(("project", "global-long", "global-medium", "global-fact"))
+_VALID_SCOPES = frozenset(
+    (
+        "project",
+        "project-long",
+        "project-medium",
+        "project-short",
+        "global-long",
+        "global-medium",
+        "global-fact",
+    )
+)
 _VALID_KINDS = frozenset(("status", "handoff", "inbox", "outbox"))
 _ARCHIVE_MONTH_PATTERN = re.compile(r"^\d{4}-(?:0[1-9]|1[0-2])$")
+MAX_SESSION_BYTES = 16 * 1024
 
 
 def ensure_global_layout(loop_root: Path) -> None:
@@ -75,6 +91,8 @@ def ensure_session_layout(
     loop_root: Path,
     project_id: str,
     session_id: str,
+    *,
+    materialize_files: bool = True,
 ) -> Path:
     root = _canonical_root(loop_root)
     _validate_id(project_id, "p", "project")
@@ -83,7 +101,9 @@ def ensure_session_layout(
     sessions_dir = _target(root, project_dir, "sessions")
     with _SessionLifecycleFlock(sessions_dir, fcntl.LOCK_SH):
         _assert_session_not_archived(root, sessions_dir, session_id)
-        return _ensure_active_session_layout(root, project_dir, session_id)
+        return _ensure_active_session_layout(
+            root, project_dir, session_id, materialize_files=materialize_files
+        )
 
 
 def write_session_file(
@@ -102,11 +122,6 @@ def write_session_file(
             code="invalid_session_file_kind",
             message="Session file kind must be status, handoff, inbox, or outbox",
         )
-    if not isinstance(value, str):
-        raise LoopMemoryError(
-            code="invalid_session_file_value",
-            message="Session file value must be text",
-        )
     if agent_id is not None:
         _validate_agent_id(agent_id)
     if kind in ("status", "handoff") and agent_id is not None:
@@ -114,12 +129,30 @@ def write_session_file(
             code="invalid_agent_scope",
             message=f"Subagents cannot write the shared session {kind} file",
         )
-
+    if not isinstance(value, str):
+        raise LoopMemoryError(
+            code="invalid_session_file_value",
+            message="Session file value must be text",
+        )
+    if not value.strip():
+        raise LoopMemoryError(
+            code="empty_memory_write",
+            message="Session memory writes must contain non-whitespace content",
+        )
+    if len(value.encode("utf-8")) > MAX_SESSION_BYTES:
+        raise LoopMemoryError(
+            code="memory_write_too_large",
+            message=f"Session memory writes must be at most {MAX_SESSION_BYTES} bytes",
+        )
+    template = _session_template(kind, agent_id)
+    template_only = value.strip() == template.strip()
     project_dir = _ensure_project_layout(root, project_id)
     sessions_dir = _target(root, project_dir, "sessions")
     with _SessionLifecycleFlock(sessions_dir, fcntl.LOCK_SH):
         _assert_session_not_archived(root, sessions_dir, session_id)
-        session_dir = _ensure_active_session_layout(root, project_dir, session_id)
+        session_dir = _ensure_active_session_layout(
+            root, project_dir, session_id, materialize_files=False
+        )
         if kind in ("status", "handoff"):
             destination = _target(root, session_dir, f"{kind}.md")
         elif agent_id is None:
@@ -135,6 +168,26 @@ def write_session_file(
             ensure_directory(agent_dir)
             destination = _target(root, agent_dir, f"{kind}.md")
 
+        if template_only and not destination.exists():
+            raise LoopMemoryError(
+                code="template_only_write",
+                message="Session memory writes must contain content beyond the template",
+            )
+
+        encoded = value.encode("utf-8")
+        try:
+            existing = destination.lstat()
+        except FileNotFoundError:
+            existing = None
+        if existing is not None:
+            if stat.S_ISLNK(existing.st_mode) or not stat.S_ISREG(existing.st_mode):
+                raise LoopMemoryError(
+                    code="unsafe_path",
+                    message="Session memory destination must be a regular file",
+                    recoverable=False,
+                )
+            if destination.read_bytes() == encoded:
+                return destination
         write_text_atomic(destination, value)
         return destination
 
@@ -152,8 +205,8 @@ def promote_entry(
         raise LoopMemoryError(
             code="invalid_scope",
             message=(
-                "Promotion scope must be project, global-long, global-medium, "
-                "or global-fact"
+                "Promotion scope must be project, project-long, project-medium, "
+                "project-short, global-long, global-medium, or global-fact"
             ),
         )
     _validate_promotion_section(scope, section)
@@ -166,6 +219,10 @@ def promote_entry(
     if scope == "project":
         destination = _target(root, "projects", project_id, "project.md")
         lease_name = f"promote-project-{project_id}.lock"
+    elif scope.startswith("project-"):
+        horizon = scope.removeprefix("project-")
+        destination = _target(root, "projects", project_id, f"{horizon}.md")
+        lease_name = f"promote-project-{horizon}-{project_id}.lock"
     else:
         horizon = "long" if scope == "global-long" else "medium"
         destination = _target(root, "global", f"{horizon}.md")
@@ -176,6 +233,12 @@ def promote_entry(
         if scope == "project":
             project_dir = _ensure_project_layout(root, project_id)
             destination = _target(root, project_dir, "project.md")
+        elif scope.startswith("project-"):
+            project_dir = _ensure_project_layout(root, project_id)
+            horizon = scope.removeprefix("project-")
+            destination = _target(root, project_dir, f"{horizon}.md")
+            if not destination.exists():
+                _ensure_file(destination, _PROJECT_HORIZON_TEMPLATES[horizon])
         else:
             _ensure_global_layout(root)
             destination = _target(root, "global", f"{horizon}.md")
@@ -316,6 +379,8 @@ def _outbox_has_content(path: Path, template_title: str) -> bool:
             path,
             os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0),
         )
+    except FileNotFoundError:
+        return False
     except OSError:
         return True
     try:
@@ -349,6 +414,14 @@ def _outbox_has_content(path: Path, template_title: str) -> bool:
     finally:
         os.close(descriptor)
     return started and expected_index != len(expected)
+
+
+def _session_template(kind: str, agent_id: str | None) -> str:
+    if kind in ("status", "handoff"):
+        return _SESSION_TEMPLATES[f"{kind}.md"]
+    if agent_id is None:
+        return _MAIN_AGENT_TEMPLATES[f"{kind}.md"]
+    return f"# Subagent {kind.title()}\n"
 
 
 def _canonical_root(loop_root: Path) -> Path:
@@ -442,6 +515,8 @@ def _ensure_active_session_layout(
     root: Path,
     project_dir: Path,
     session_id: str,
+    *,
+    materialize_files: bool = True,
 ) -> Path:
     session_dir = _target(
         root,
@@ -455,10 +530,11 @@ def _ensure_active_session_layout(
     subagents_dir = _target(root, agents_dir, "subagents")
     for directory in (session_dir, agents_dir, main_dir, subagents_dir):
         ensure_directory(directory)
-    for name, template in _SESSION_TEMPLATES.items():
-        _ensure_file(_target(root, session_dir, name), template)
-    for name, template in _MAIN_AGENT_TEMPLATES.items():
-        _ensure_file(_target(root, main_dir, name), template)
+    if materialize_files:
+        for name, template in _SESSION_TEMPLATES.items():
+            _ensure_file(_target(root, session_dir, name), template)
+        for name, template in _MAIN_AGENT_TEMPLATES.items():
+            _ensure_file(_target(root, main_dir, name), template)
     return session_dir
 
 
@@ -648,6 +724,8 @@ def _validate_existing_file(path: Path) -> None:
 def _validate_promotion_section(scope: str, section: str) -> None:
     if scope == "project":
         valid = section in PROJECT_SECTIONS
+    elif scope.startswith("project-"):
+        valid = section == "Entries"
     elif scope == "global-long":
         valid = section == "Methodology"
     else:
@@ -716,7 +794,7 @@ def _normalize_entry(entry: str) -> tuple[str, str]:
 
 
 def _validate_promotion_status(scope: str, section: str, status: str) -> None:
-    if status == "inferred" and scope in ("project", "global-long"):
+    if status == "inferred" and scope in ("project", "project-long", "global-long"):
         raise LoopMemoryError(
             code="inferred_not_durable",
             message=f"Inferred entries cannot be promoted to {scope}",

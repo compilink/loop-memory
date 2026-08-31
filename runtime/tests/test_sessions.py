@@ -73,12 +73,8 @@ class SessionMemoryTests(unittest.TestCase):
                 Path("projects/p-project/project.md"),
                 Path("projects/p-project/sessions/active/s-session/status.md"),
                 Path("projects/p-project/sessions/active/s-session/handoff.md"),
-                Path(
-                    "projects/p-project/sessions/active/s-session/agents/main/inbox.md"
-                ),
-                Path(
-                    "projects/p-project/sessions/active/s-session/agents/main/outbox.md"
-                ),
+                Path("projects/p-project/sessions/active/s-session/agents/main/inbox.md"),
+                Path("projects/p-project/sessions/active/s-session/agents/main/outbox.md"),
             }
             actual_files = {
                 path.relative_to(loop_root)
@@ -122,6 +118,59 @@ class SessionMemoryTests(unittest.TestCase):
                 self.assertTrue(path.is_file())
             self.assertFalse((project_root / ".memory").exists())
             self.assertFalse(any(path.is_file() for path in project_root.rglob("*")))
+
+    def test_session_layout_can_be_directory_only_until_a_meaningful_write(self):
+        module = self.sessions_module()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir) / "loop"
+            session = module.ensure_session_layout(
+                root, "p-one", "s-one", materialize_files=False
+            )
+            self.assertFalse((session / "status.md").exists())
+            self.assertFalse((session / "handoff.md").exists())
+            self.assertFalse((session / "agents/main/inbox.md").exists())
+            self.assertFalse((session / "agents/main/outbox.md").exists())
+            destination = module.write_session_file(
+                root, "p-one", "s-one", "status", "Goal: ship\n"
+            )
+            self.assertEqual(destination, session / "status.md")
+            self.assertEqual(destination.read_text(encoding="utf-8"), "Goal: ship\n")
+
+    def test_session_write_rejects_empty_template_and_oversized_bodies(self):
+        module = self.sessions_module()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir) / "loop"
+            cases = (
+                ("empty", "   \n", "empty_memory_write"),
+                ("template", "# Session Status\n", "template_only_write"),
+                ("large", "x" * (module.MAX_SESSION_BYTES + 1), "memory_write_too_large"),
+            )
+            for name, value, code in cases:
+                with self.subTest(name=name):
+                    self.assert_loop_error(
+                        code,
+                        lambda value=value: module.write_session_file(
+                            root, "p-one", "s-one", "status", value
+                        ),
+                    )
+            self.assertFalse((root / "projects/p-one/sessions/active/s-one/status.md").exists())
+
+    def test_identical_session_write_is_a_noop(self):
+        module = self.sessions_module()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir) / "loop"
+            destination = module.write_session_file(
+                root, "p-one", "s-one", "status", "Goal: ship\n"
+            )
+            before = destination.stat()
+            with mock.patch.object(
+                module, "write_text_atomic", side_effect=AssertionError("rewrote unchanged body")
+            ):
+                repeated = module.write_session_file(
+                    root, "p-one", "s-one", "status", "Goal: ship\n"
+                )
+            self.assertEqual(repeated, destination)
+            self.assertEqual(destination.stat().st_ino, before.st_ino)
 
     def test_initialization_is_additive_and_preserves_existing_text(self):
         module = self.sessions_module()

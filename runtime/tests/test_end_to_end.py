@@ -121,6 +121,8 @@ class MaintenanceEndToEndTests(unittest.TestCase):
                 return json.loads(completed.stdout)
 
             first = run()
+            status = Path(first["paths"]["status"])
+            status.write_text("Goal: recover\n", encoding="utf-8")
             shutil.rmtree(Path(first["paths"]["session"]))
 
             recovered = run()
@@ -134,7 +136,7 @@ class MaintenanceEndToEndTests(unittest.TestCase):
                 "session_memory_reinitialized",
                 {notice["code"] for notice in recovered["notices"]},
             )
-            self.assertTrue(Path(recovered["paths"]["status"]).is_file())
+            self.assertFalse(Path(recovered["paths"]["status"]).exists())
 
             repeated = run()
             self.assertNotIn("session_recovered", repeated)
@@ -507,8 +509,11 @@ class MaintenanceEndToEndTests(unittest.TestCase):
             template_only = self.archive(
                 loop_root,
                 "s-template-only",
-                subagent_outbox="# Subagent Outbox\n\n",
+                subagent_outbox="# Subagent Outbox\n\nplaceholder\n",
                 mtime=CUTOFF - 1,
+            )
+            (template_only / "agents/subagents/worker/outbox.md").write_text(
+                "# Subagent Outbox\n\n", encoding="utf-8"
             )
             active = ensure_session_layout(
                 loop_root,
@@ -1416,7 +1421,7 @@ class MaintenanceEndToEndTests(unittest.TestCase):
             self.assertEqual(result["preserved"][0]["reason"], "unresolved_outbox")
             self.assertNotIn(SECRET, json.dumps(result, sort_keys=True))
 
-    def test_missing_main_outbox_preserves_the_archived_session(self):
+    def test_missing_main_outbox_is_treated_as_empty_for_archived_cleanup(self):
         maintenance = self.maintenance_module()
         with tempfile.TemporaryDirectory() as temp_dir:
             loop_root = Path(temp_dir) / "loop"
@@ -1430,20 +1435,11 @@ class MaintenanceEndToEndTests(unittest.TestCase):
 
             result = maintenance.maintain(loop_root, NOW)
 
-            self.assertTrue(archived.is_dir())
-            self.assertEqual(
-                result["preserved"],
-                [
-                    {
-                        "kind": "archived_session",
-                        "id": "s-missing-main-outbox",
-                        "path": str(archived),
-                        "reason": "unresolved_outbox",
-                    }
-                ],
-            )
+            self.assertFalse(archived.exists())
+            self.assertEqual(result["preserved"], [])
+            self.assertEqual(result["deleted"][0]["id"], "s-missing-main-outbox")
 
-    def test_missing_discovered_subagent_outbox_preserves_the_session(self):
+    def test_missing_discovered_subagent_outbox_is_treated_as_empty(self):
         maintenance = self.maintenance_module()
         with tempfile.TemporaryDirectory() as temp_dir:
             loop_root = Path(temp_dir) / "loop"
@@ -1462,18 +1458,9 @@ class MaintenanceEndToEndTests(unittest.TestCase):
 
             result = maintenance.maintain(loop_root, NOW)
 
-            self.assertTrue(archived.is_dir())
-            self.assertEqual(
-                result["preserved"],
-                [
-                    {
-                        "kind": "archived_session",
-                        "id": "s-missing-subagent-outbox",
-                        "path": str(archived),
-                        "reason": "unresolved_outbox",
-                    }
-                ],
-            )
+            self.assertFalse(archived.exists())
+            self.assertEqual(result["preserved"], [])
+            self.assertEqual(result["deleted"][0]["id"], "s-missing-subagent-outbox")
 
     def test_manifest_swap_to_symlink_is_rejected_without_following_it(self):
         maintenance = self.maintenance_module()

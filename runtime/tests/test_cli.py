@@ -98,6 +98,39 @@ class CliTestCase(unittest.TestCase):
         self.assertIsInstance(payload, dict)
         return payload
 
+    def test_project_horizon_promotion_uses_explicit_file_without_creating_siblings(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            home = Path(temp_dir).resolve()
+            project = home / "project"
+            project.mkdir()
+            root = home / "loop"
+            entered = self.assert_success(
+                self.run_cli(
+                    "enter", "--cwd", project, "--session-id", "host",
+                    "--root", root, "--json", home=home,
+                ), "enter", root,
+            )
+            self.assertIn("project_long", entered["paths"])
+            self.assertIn("project_medium", entered["paths"])
+            self.assertIn("project_short", entered["paths"])
+            self.assertFalse(Path(entered["paths"]["project_short"]).exists())
+            entry = home / "short.md"
+            entry.write_text(
+                "- [2026-08-31][verified] Current task summary.\n"
+                "  Evidence: focused test\n",
+                encoding="utf-8",
+            )
+            promoted = self.assert_success(
+                self.run_cli(
+                    "promote", "--cwd", project, "--thread-id", "host",
+                    "--scope", "project-short", "--section", "Entries",
+                    "--input", entry, "--root", root, "--json", home=home,
+                ), "promote", root,
+            )
+            self.assertTrue(promoted["changed"])
+            self.assertIn("Current task summary", Path(entered["paths"]["project_short"]).read_text())
+            self.assertFalse(Path(entered["paths"]["project_medium"]).exists())
+
     def test_global_fact_promotion_returns_index_and_detail_paths(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             home = Path(temp_dir).resolve()
@@ -407,12 +440,10 @@ with mock.patch.object(
                 "global_medium",
                 "global_short",
                 "project_memory",
-                "status",
-                "handoff",
-                "agent_inbox",
-                "agent_outbox",
             ):
                 self.assertTrue(Path(first["paths"][name]).is_file())
+            for name in ("status", "handoff", "agent_inbox", "agent_outbox"):
+                self.assertFalse(Path(first["paths"][name]).exists())
 
 
 class CommandContractTests(CliTestCase):

@@ -110,7 +110,10 @@ def _parser(*, json_help: bool = False) -> argparse.ArgumentParser:
     promote.add_argument(
         "--scope",
         required=True,
-        choices=("project", "global-long", "global-medium", "global-fact"),
+        choices=(
+            "project", "project-long", "project-medium", "project-short",
+            "global-long", "global-medium", "global-fact",
+        ),
     )
     promote.add_argument("--section", required=True)
     promote.add_argument("--input", required=True)
@@ -704,6 +707,9 @@ def _identity_paths(
         "global_facts": str(root / "global" / "facts" / "entries"),
         "project": str(project),
         "project_memory": str(project / "project.md"),
+        "project_long": str(project / "long.md"),
+        "project_medium": str(project / "medium.md"),
+        "project_short": str(project / "short.md"),
         "session": str(session),
         "status": str(session / "status.md"),
         "handoff": str(session / "handoff.md"),
@@ -715,8 +721,13 @@ def _identity_paths(
 def _current_scope_digest(root: Path, project_id: str, session_id: str) -> str:
     project = root / "projects" / project_id
     session = project / "sessions" / "active" / session_id
-    files = [project / "project.md", session / "status.md", session / "handoff.md",
-             session / "agents" / "main" / "inbox.md", session / "agents" / "main" / "outbox.md"]
+    files = [
+        project / name for name in ("project.md", "long.md", "medium.md", "short.md")
+    ] + [
+        session / "status.md", session / "handoff.md",
+        session / "agents" / "main" / "inbox.md",
+        session / "agents" / "main" / "outbox.md",
+    ]
     digest = hashlib.sha256()
     for path in files:
         try:
@@ -738,7 +749,9 @@ def _materialize_session_with_rollback(
     session_id: str,
 ):
     """Create additive session layout and return identity-safe rollback."""
-    session = ensure_session_layout(root, project_id, session_id)
+    session = ensure_session_layout(
+        root, project_id, session_id, materialize_files=False
+    )
     identity = (session.stat().st_dev, session.stat().st_ino)
 
     def rollback() -> None:
@@ -749,10 +762,7 @@ def _materialize_session_with_rollback(
                 message="Created session tree changed before rollback",
                 recoverable=False,
             )
-        expected = {
-            Path("status.md"), Path("handoff.md"),
-            Path("agents/main/inbox.md"), Path("agents/main/outbox.md"),
-        }
+        expected: set[Path] = set()
         files = {
             path.relative_to(session)
             for path in session.rglob("*") if path.is_file() and not path.is_symlink()
@@ -848,7 +858,9 @@ def _identity_preflight(
     # generations are materialized by RegistryStore while its mutation lease is
     # held, before their registry record is published.
     ensure_project_layout(prepared, project_id)
-    ensure_session_layout(prepared, project_id, session_id)
+    ensure_session_layout(
+        prepared, project_id, session_id, materialize_files=False
+    )
     global_long_organization_due = False
     try:
         global_facts.validate_long_document(
@@ -1139,7 +1151,7 @@ def _dispatch(arguments: argparse.Namespace) -> dict[str, object]:
         )
         required = (
             "project_promote"
-            if arguments.scope == "project"
+            if arguments.scope.startswith("project")
             else "global_promote"
         )
         _require_capability(identity, required)
