@@ -10,6 +10,12 @@ authority. The only data root is `~/loop-memory`, shared by Agents of the same
 operating-system user. External legacy sources are read-only and product
 memory remains separate.
 
+For Codex, rely on the installed native `loop-memory` permissions profile for
+new threads. It extends the selected workspace policy and grants only the
+exact `~/loop-memory` path with `write` access; do not ask Agents to append
+`--add-dir` on every task. Existing threads retain their creation-time
+sandbox; use the host's normal new-thread or resume flow after installation.
+
 ## Entry and capabilities
 
 Call `enter` with actual cwd, host session ID, project root when known, and

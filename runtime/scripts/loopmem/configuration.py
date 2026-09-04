@@ -14,11 +14,14 @@ from typing import Any
 
 
 ROOT = "~/loop-memory"
+CODEX_PERMISSION_PROFILE = "loop-memory"
+CODEX_PERMISSION_PARENT = ":workspace"
 CODEX_ADAPTER = "~/.local/share/loop-memory/adapters/codex_hook.py"
 CLAUDE_ADAPTER = "~/.local/share/loop-memory/adapters/claude_hook.py"
 HOOK_TIMEOUT = 12
 # Codex caps synchronous SessionEnd handlers at three seconds.
 CODEX_SESSION_END_TIMEOUT = 3
+_MISSING = object()
 
 
 def _normalise_root(value: object) -> str | None:
@@ -56,14 +59,18 @@ def _toml_roots(values: list[str]) -> str:
     return "[" + ", ".join(_toml_string(item) for item in values) + "]"
 
 
-_SECTION = re.compile(r"(?m)^\[([^\[\]\n]+)\]\s*$")
+_SECTION = re.compile(r"(?m)^\[([^\[\]\n]+)\]\s*(?:#.*)?$")
 _KEY_LINE = re.compile(r"(?m)^([ \t]*)([A-Za-z0-9_-]+)([ \t]*)=")
+
+
+def _normalise_section_name(value: str) -> str:
+    return re.sub(r"(['\"])([^'\"]*)\1", r"\2", value.strip())
 
 
 def _section_bounds(text: str, section: str) -> tuple[int, int] | None:
     matches = list(_SECTION.finditer(text))
     for index, match in enumerate(matches):
-        if match.group(1).strip() == section:
+        if _normalise_section_name(match.group(1)) == section:
             end = matches[index + 1].start() if index + 1 < len(matches) else len(text)
             return match.end(), end
     return None
@@ -83,19 +90,304 @@ def _replace_toml_key(section_text: str, key: str, replacement: str) -> tuple[st
     return section_text, False
 
 
+def _replace_toml_quoted_key(
+    section_text: str, key: str, replacement: str
+) -> tuple[str, bool]:
+    quoted = "(?:" + re.escape(json.dumps(key)) + "|'" + re.escape(key) + "')"
+    pattern = re.compile(
+        r"(?m)^([ \t]*" + quoted + r"[ \t]*=[ \t]*)[^\n]*(?=\n|$)"
+    )
+    found = pattern.search(section_text)
+    if found:
+        return (
+            section_text[: found.start()]
+            + found.group(1)
+            + replacement
+            + section_text[found.end() :],
+            True,
+        )
+    return section_text, False
+
+
+def _set_top_level_toml_key(text: str, key: str, replacement: str) -> str:
+    """Set a scalar before the first table without reserialising user TOML."""
+    first_section = _SECTION.search(text)
+    prefix_end = first_section.start() if first_section else len(text)
+    prefix = text[:prefix_end]
+    suffix = text[prefix_end:]
+    prefix, found = _replace_toml_key(prefix, key, replacement)
+    if found:
+        return prefix + suffix
+    separator = "" if not prefix or prefix.endswith("\n") else "\n"
+    return prefix + separator + f"{key} = {replacement}\n" + suffix
+
+
+def _append_section(text: str, section: str, body: str) -> str:
+    separator = "" if not text or text.endswith("\n") else "\n"
+    return text + separator + f"\n[{section}]\n" + body.rstrip() + "\n"
+
+
+def merge_codex_permission_profile(text: str) -> str:
+    """Give every new Codex thread the canonical Loop Memory access profile."""
+    import tomllib
+
+    parsed = tomllib.loads(text)
+    permissions_value = parsed.get("permissions", _MISSING)
+    if permissions_value is _MISSING:
+        permissions: dict[str, Any] = {}
+    elif isinstance(permissions_value, dict):
+        permissions = permissions_value
+    else:
+        raise ValueError("codex_permission_profile_conflict")
+    existing_profile = permissions.get(CODEX_PERMISSION_PROFILE, _MISSING)
+    if existing_profile is not _MISSING and not isinstance(existing_profile, dict):
+        raise ValueError("codex_permission_profile_conflict")
+    if isinstance(existing_profile, dict):
+        allowed = {"extends", "filesystem", "network"}
+        filesystem = existing_profile.get("filesystem", {})
+        network = existing_profile.get("network", {})
+        if (
+            set(existing_profile) - allowed
+            or not isinstance(filesystem, dict)
+            or set(filesystem) - {ROOT}
+            or (ROOT in filesystem and not isinstance(filesystem[ROOT], str))
+            or not isinstance(network, dict)
+            or set(network) - {"enabled"}
+            or ("enabled" in network and not isinstance(network["enabled"], bool))
+            or ("extends" in existing_profile and not isinstance(existing_profile["extends"], str))
+        ):
+            raise ValueError("codex_permission_profile_conflict")
+    legacy = parsed.get("sandbox_workspace_write")
+    legacy_network = (
+        legacy.get("network_access")
+        if isinstance(legacy, dict) and isinstance(legacy.get("network_access"), bool)
+        else None
+    )
+
+    existing_default = parsed.get("default_permissions", _MISSING)
+    if existing_default is not _MISSING and not isinstance(existing_default, str):
+        raise ValueError("codex_default_permissions_conflict")
+    if isinstance(existing_default, str) and existing_default.startswith(":") and existing_default not in {
+        ":workspace", ":read-only"
+    }:
+        raise ValueError("codex_default_permissions_conflict")
+    if (
+        isinstance(existing_default, str)
+        and not existing_default.startswith(":")
+        and existing_default != CODEX_PERMISSION_PROFILE
+        and existing_default not in permissions
+    ):
+        raise ValueError("codex_default_permissions_conflict")
+    if (
+        isinstance(existing_default, str)
+        and not existing_default.startswith(":")
+        and existing_default != CODEX_PERMISSION_PROFILE
+        and not isinstance(permissions.get(existing_default), dict)
+    ):
+        raise ValueError("codex_default_permissions_conflict")
+    if existing_default == CODEX_PERMISSION_PROFILE and isinstance(existing_profile, dict):
+        inherited = existing_profile.get("extends")
+        parent = inherited if isinstance(inherited, str) else CODEX_PERMISSION_PARENT
+    else:
+        parent = (
+            existing_default
+            if isinstance(existing_default, str)
+            else CODEX_PERMISSION_PARENT
+        )
+    text = _set_top_level_toml_key(
+        text,
+        "default_permissions",
+        _toml_string(CODEX_PERMISSION_PROFILE),
+    )
+
+    profile_bounds = _section_bounds(text, "permissions.loop-memory")
+    if isinstance(existing_profile, dict) and profile_bounds is None:
+        # A dotted or inline profile cannot be edited without reserialising
+        # user TOML; fail closed instead of creating a duplicate table.
+        raise ValueError("codex_permission_profile_conflict")
+    if profile_bounds is None:
+        text = _append_section(
+            text,
+            "permissions.loop-memory",
+            f"extends = {_toml_string(parent)}",
+        )
+    else:
+        section_start, section_end = profile_bounds
+        section = text[section_start:section_end]
+        section, found = _replace_toml_key(
+            section, "extends", _toml_string(parent)
+        )
+        if not found:
+            prefix = "" if not section or section.startswith("\n") else "\n"
+            section = section + prefix + "extends = " + _toml_string(parent) + "\n"
+        text = text[:section_start] + section + text[section_end:]
+
+    filesystem_bounds = _section_bounds(text, "permissions.loop-memory.filesystem")
+    if filesystem_bounds is None:
+        text = _append_section(
+            text,
+            "permissions.loop-memory.filesystem",
+            f"{_toml_string(ROOT)} = {_toml_string('write')}",
+        )
+    else:
+        section_start, section_end = filesystem_bounds
+        section = text[section_start:section_end]
+        section, found = _replace_toml_quoted_key(section, ROOT, _toml_string("write"))
+        if not found:
+            prefix = "" if not section or section.startswith("\n") else "\n"
+            section = section + prefix + f"{_toml_string(ROOT)} = {_toml_string('write')}\n"
+        text = text[:section_start] + section + text[section_end:]
+
+    if legacy_network is not None:
+        current = tomllib.loads(text)
+        current_profile = current.get("permissions", {}).get(CODEX_PERMISSION_PROFILE, {})
+        current_network = (
+            current_profile.get("network")
+            if isinstance(current_profile, dict)
+            else None
+        )
+        if isinstance(current_network, dict) and "enabled" in current_network:
+            legacy_network = None
+    if legacy_network is not None:
+        network_bounds = _section_bounds(text, "permissions.loop-memory.network")
+        if network_bounds is None:
+            text = _append_section(
+                text,
+                "permissions.loop-memory.network",
+                "enabled = " + ("true" if legacy_network else "false"),
+            )
+        else:
+            section_start, section_end = network_bounds
+            section = text[section_start:section_end]
+            section, found = _replace_toml_key(
+                section, "enabled", "true" if legacy_network else "false"
+            )
+            if not found:
+                prefix = "" if not section or section.startswith("\n") else "\n"
+                section = section + prefix + "enabled = " + ("true" if legacy_network else "false") + "\n"
+            text = text[:section_start] + section + text[section_end:]
+
+    # Parse the final document so malformed nested tables never leave staging.
+    tomllib.loads(text)
+    return text
+
+
+def remove_codex_permission_profile(
+    text: str, *, previous_default_permissions: object = _MISSING
+) -> str:
+    """Remove only Loop Memory-owned profile values from Codex TOML."""
+    import tomllib
+
+    original = tomllib.loads(text)
+    permissions = original.get("permissions", {})
+    if permissions is not None and not isinstance(permissions, dict):
+        raise ValueError("codex_permission_profile_conflict")
+    original_profile = (
+        permissions.get(CODEX_PERMISSION_PROFILE)
+        if isinstance(permissions, dict)
+        else None
+    )
+    if original_profile is not None and not isinstance(original_profile, dict):
+        raise ValueError("codex_permission_profile_conflict")
+    parent = (
+        original_profile.get("extends")
+        if isinstance(original_profile, dict)
+        and isinstance(original_profile.get("extends"), str)
+        else CODEX_PERMISSION_PARENT
+    )
+
+    if (
+        isinstance(original_profile, dict)
+        and _section_bounds(text, "permissions.loop-memory") is None
+    ):
+        raise ValueError("codex_permission_profile_conflict")
+
+    for section_name, owned_keys in (
+        ("permissions.loop-memory", ("extends",)),
+        ("permissions.loop-memory.filesystem", (ROOT,)),
+        ("permissions.loop-memory.network", ("enabled",)),
+    ):
+        bounds = _section_bounds(text, section_name)
+        if bounds is None:
+            continue
+        section_start, section_end = bounds
+        section = text[section_start:section_end]
+        for key in owned_keys:
+            if key == ROOT:
+                quoted = "(?:" + re.escape(json.dumps(ROOT)) + "|'" + re.escape(ROOT) + "')"
+                pattern = re.compile(r"(?m)^\s*" + quoted + r"\s*=[^\n]*(?:\n|$)")
+            else:
+                pattern = re.compile(r"(?m)^\s*" + re.escape(key) + r"\s*=[^\n]*(?:\n|$)")
+            section = pattern.sub("", section, count=1)
+        text = text[:section_start] + section + text[section_end:]
+
+    # Empty owned tables are safe to remove; tables with user values remain.
+    lines = text.splitlines(keepends=True)
+    output: list[str] = []
+    index = 0
+    owned_sections = {
+        "permissions.loop-memory",
+        "permissions.loop-memory.filesystem",
+        "permissions.loop-memory.network",
+    }
+    while index < len(lines):
+        match = re.match(r"^\[([^\[\]]+)\]\s*(?:#.*)?$", lines[index].rstrip("\n"))
+        if match and _normalise_section_name(match.group(1)) in owned_sections:
+            end = index + 1
+            while end < len(lines) and not re.match(r"^\[[^\[\]]+\]\s*(?:#.*)?$", lines[end].rstrip("\n")):
+                end += 1
+            body = "".join(lines[index + 1:end]).strip()
+            if not body:
+                index = end
+                continue
+        output.append(lines[index])
+        index += 1
+    result = "".join(output)
+    parsed = tomllib.loads(result)
+    if parsed.get("default_permissions") == CODEX_PERMISSION_PROFILE:
+        first_section = _SECTION.search(result)
+        prefix_end = first_section.start() if first_section else len(result)
+        prefix = result[:prefix_end]
+        suffix = result[prefix_end:]
+        scalar = re.compile(r"(?m)^([ \t]*default_permissions[ \t]*=[ \t]*)[^\n]*(?:\n|$)")
+        if previous_default_permissions is None:
+            replacement = ""
+        elif previous_default_permissions is _MISSING:
+            replacement = "default_permissions = " + _toml_string(parent) + "\n"
+        elif isinstance(previous_default_permissions, str):
+            replacement = "default_permissions = " + _toml_string(previous_default_permissions) + "\n"
+        else:
+            raise ValueError("invalid_previous_default_permissions")
+        result = scalar.sub(replacement, prefix, count=1) + suffix
+    tomllib.loads(result)
+    return result
+
+
 def merge_codex_config(text: str) -> str:
     """Set the two required sandbox values while retaining all other TOML."""
     import tomllib
 
     parsed = tomllib.loads(text)
-    table = parsed.get("sandbox_workspace_write")
-    table = table if isinstance(table, dict) else {}
+    table_value = parsed.get("sandbox_workspace_write", _MISSING)
+    if table_value is not _MISSING and not isinstance(table_value, dict):
+        raise ValueError("codex_sandbox_conflict")
+    table = table_value if isinstance(table_value, dict) else {}
+    if (
+        "network_access" in table
+        and not isinstance(table["network_access"], bool)
+    ):
+        raise ValueError("codex_sandbox_conflict")
+    if (
+        "writable_roots" in table
+        and not isinstance(table["writable_roots"], list)
+    ):
+        raise ValueError("codex_sandbox_conflict")
     roots = _normalise_roots(table.get("writable_roots"))
     replacement_roots = _toml_roots(roots)
     bounds = _section_bounds(text, "sandbox_workspace_write")
     if bounds is None:
         separator = "" if not text or text.endswith("\n") else "\n"
-        return (
+        legacy = (
             text
             + separator
             + "\n[sandbox_workspace_write]\n"
@@ -104,10 +396,11 @@ def merge_codex_config(text: str) -> str:
             + replacement_roots
             + "\n"
         )
+        return merge_codex_permission_profile(legacy)
     section_start, section_end = bounds
     section = text[section_start:section_end]
     section, roots_found = _replace_toml_key(section, "writable_roots", replacement_roots)
-    section, network_found = _replace_toml_key(section, "network_access", "true")
+    network_found = bool(re.search(r"(?m)^\s*network_access\s*=", section))
     additions: list[str] = []
     if not network_found:
         additions.append("network_access = true")
@@ -116,7 +409,9 @@ def merge_codex_config(text: str) -> str:
     if additions:
         prefix = "" if not section or section.startswith("\n") else "\n"
         section = section + prefix + "\n".join(additions) + "\n"
-    return text[:section_start] + section + text[section_end:]
+    return merge_codex_permission_profile(
+        text[:section_start] + section + text[section_end:]
+    )
 
 
 def _set_codex_writable_roots(text: str, roots: list[str]) -> str:

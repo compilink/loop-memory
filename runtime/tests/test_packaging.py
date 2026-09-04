@@ -163,16 +163,20 @@ class ConfigurationMergeTests(unittest.TestCase):
         from scripts.loopmem.configuration import (
             merge_claude_settings,
             merge_codex_config,
+            merge_codex_permission_profile,
             merge_codex_hooks,
             merge_codex_writable_root,
             remove_codex_hooks,
+            remove_codex_permission_profile,
             remove_codex_writable_root,
         )
 
         self.merge_codex_config = merge_codex_config
+        self.merge_codex_permission_profile = merge_codex_permission_profile
         self.merge_codex_hooks = merge_codex_hooks
         self.merge_codex_writable_root = merge_codex_writable_root
         self.remove_codex_hooks = remove_codex_hooks
+        self.remove_codex_permission_profile = remove_codex_permission_profile
         self.remove_codex_writable_root = remove_codex_writable_root
         self.merge_claude_settings = merge_claude_settings
 
@@ -185,27 +189,134 @@ class ConfigurationMergeTests(unittest.TestCase):
         merged = self.merge_codex_config(source)
         after = tomllib.loads(merged)
 
-        self.assertEqual(set(after), set(before))
+        self.assertEqual(
+            set(after), set(before) | {"default_permissions", "permissions"}
+        )
         self.assertEqual(after["model"], before["model"])
         self.assertEqual(after["future"], before["future"])
         self.assertEqual(
             after["sandbox_workspace_write"]["unrelated"],
             before["sandbox_workspace_write"]["unrelated"],
         )
-        self.assertIs(after["sandbox_workspace_write"]["network_access"], True)
+        self.assertIs(after["sandbox_workspace_write"]["network_access"], False)
         roots = after["sandbox_workspace_write"]["writable_roots"]
         self.assertEqual(roots.count("~/loop-memory"), 1)
         self.assertNotIn("~/loop-memory/", roots)
-        self.assertNotIn("default_permissions", after)
+        self.assertEqual(after["default_permissions"], "loop-memory")
+        self.assertEqual(
+            after["permissions"]["loop-memory"]["filesystem"]["~/loop-memory"],
+            "write",
+        )
         self.assertEqual(self.merge_codex_config(merged), merged)
+
+    def test_codex_permission_profile_grants_loop_root_and_preserves_network(self):
+        source = (
+            'model = "fixture"\n'
+            'default_permissions = "custom"\n'
+            '[permissions.custom]\n'
+            'extends = ":workspace"\n'
+            '[sandbox_workspace_write]\n'
+            'network_access = true\n'
+        )
+        merged = self.merge_codex_permission_profile(source)
+        parsed = tomllib.loads(merged)
+        self.assertEqual(parsed["default_permissions"], "loop-memory")
+        profile = parsed["permissions"]["loop-memory"]
+        self.assertEqual(profile["extends"], "custom")
+        self.assertEqual(profile["filesystem"]["~/loop-memory"], "write")
+        self.assertIs(profile["network"]["enabled"], True)
+        self.assertEqual(self.merge_codex_permission_profile(merged), merged)
+
+    def test_codex_permission_profile_uses_filesystem_map_not_protocol_array(self):
+        merged = self.merge_codex_permission_profile('model = "fixture"\n')
+        parsed = tomllib.loads(merged)
+        self.assertEqual(
+            parsed["permissions"]["loop-memory"]["filesystem"],
+            {"~/loop-memory": "write"},
+        )
+        self.assertNotIn("file_system", parsed["permissions"]["loop-memory"])
+
+    def test_codex_permission_profile_removal_restores_previous_named_default(self):
+        source = self.merge_codex_permission_profile(
+            'model = "fixture"\n'
+            'default_permissions = "custom"\n'
+            '[permissions.custom]\n'
+            'extends = ":workspace"\n'
+        )
+        removed = self.remove_codex_permission_profile(source)
+        parsed = tomllib.loads(removed)
+        self.assertEqual(parsed["default_permissions"], "custom")
+        self.assertNotIn("loop-memory", parsed["permissions"])
+        self.assertEqual(self.remove_codex_permission_profile(removed), removed)
+
+    def test_codex_permission_profile_rejects_unowned_name_collision(self):
+        source = (
+            'model = "fixture"\n'
+            '[permissions.loop-memory]\n'
+            'description = "user-owned"\n'
+        )
+        with self.assertRaisesRegex(ValueError, "codex_permission_profile_conflict"):
+            self.merge_codex_permission_profile(source)
+
+    def test_codex_permission_profile_rejects_malformed_owned_namespace(self):
+        cases = (
+            'model = "fixture"\npermissions = "user-owned"\n',
+            'model = "fixture"\n[permissions]\nloop-memory = "user-owned"\n',
+            'model = "fixture"\ndefault_permissions = 42\n',
+            'model = "fixture"\ndefault_permissions = "loop-memory"\n'
+            '[permissions.loop-memory]\nextends = 42\n',
+            'model = "fixture"\ndefault_permissions = "loop-memory"\n'
+            '[permissions.loop-memory.network]\nenabled = "yes"\n',
+        )
+        for source in cases:
+            with self.subTest(source=source):
+                with self.assertRaisesRegex(ValueError, "codex_.*conflict"):
+                    self.merge_codex_permission_profile(source)
+
+    def test_codex_permission_profile_rejects_inline_profile_without_rewriting(self):
+        source = (
+            'model = "fixture"\n'
+            'permissions = { "loop-memory" = { "extends" = ":workspace" } }\n'
+        )
+        with self.assertRaisesRegex(ValueError, "codex_permission_profile_conflict"):
+            self.merge_codex_permission_profile(source)
+
+    def test_codex_permission_profile_accepts_single_quoted_root_key(self):
+        source = (
+            'model = "fixture"\n'
+            '[permissions.loop-memory]\n'
+            'extends = ":workspace"\n'
+            '[permissions.loop-memory.filesystem]\n'
+            "'~/loop-memory' = 'read'\n"
+        )
+        merged = self.merge_codex_permission_profile(source)
+        parsed = tomllib.loads(merged)
+        self.assertEqual(
+            parsed["permissions"]["loop-memory"]["filesystem"],
+            {"~/loop-memory": "write"},
+        )
 
     def test_codex_config_merge_creates_missing_owned_section(self):
         source = "model = \"fixture-model\"\n[future]\nenabled = true\n"
         merged = self.merge_codex_config(source)
         parsed = tomllib.loads(merged)
-        self.assertEqual(set(parsed), {"model", "future", "sandbox_workspace_write"})
+        self.assertEqual(
+            set(parsed),
+            {"model", "future", "sandbox_workspace_write", "default_permissions", "permissions"},
+        )
         self.assertTrue(parsed["sandbox_workspace_write"]["network_access"])
         self.assertEqual(parsed["sandbox_workspace_write"]["writable_roots"], ["~/loop-memory"])
+
+    def test_codex_config_merge_rejects_malformed_sandbox_values(self):
+        cases = (
+            'model = "fixture"\nsandbox_workspace_write = "user-owned"\n',
+            'model = "fixture"\n[sandbox_workspace_write]\nnetwork_access = "yes"\n',
+            'model = "fixture"\n[sandbox_workspace_write]\nwritable_roots = "~/existing"\n',
+        )
+        for source in cases:
+            with self.subTest(source=source):
+                with self.assertRaisesRegex(ValueError, "codex_sandbox_conflict"):
+                    self.merge_codex_config(source)
 
     def test_installer_root_merge_preserves_network_access_and_unknown_keys(self):
         source = (
@@ -450,6 +561,33 @@ class StagedConfigurationTests(unittest.TestCase):
             invalid = self.run_validator(source, staged)
             self.assertNotEqual(invalid.returncode, 0)
             self.assertNotIn("fixture-value", invalid.stdout + invalid.stderr)
+
+    def test_validator_rejects_noncanonical_permission_profile(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary)
+            source = base / "source"
+            staged = base / "staged"
+            source.mkdir()
+            staged.mkdir()
+            shutil.copy2(FIXTURES / "codex-config-sanitized.toml", source / "config.toml")
+            shutil.copy2(FIXTURES / "codex-hooks-sanitized.json", source / "hooks.json")
+            shutil.copy2(FIXTURES / "claude-settings-sanitized.json", source / "settings.json")
+            completed = subprocess.run(
+                [sys.executable, str(STAGE_SCRIPT), "--codex-config", str(source / "config.toml"),
+                 "--codex-hooks", str(source / "hooks.json"), "--claude-settings", str(source / "settings.json"),
+                 "--output-dir", str(staged)], capture_output=True, text=True, check=False,
+            )
+            self.assertEqual(completed.returncode, 0)
+            (staged / "config.toml").write_text(
+                "default_permissions = \"loop-memory\"\n"
+                "[sandbox_workspace_write]\nnetwork_access = true\n"
+                "writable_roots = [\"~/loop-memory\"]\n"
+                "[permissions.loop-memory]\nextends = \":workspace\"\n"
+                "unexpected = true\n"
+                "[permissions.loop-memory.filesystem]\n\"~/loop-memory\" = \"write\"\n",
+                encoding="utf-8",
+            )
+            self.assertNotEqual(self.run_validator(source, staged).returncode, 0)
 
     def test_validator_accepts_owned_containers_added_to_minimal_sources(self):
         with tempfile.TemporaryDirectory() as temporary:

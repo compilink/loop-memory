@@ -33,8 +33,11 @@ if str(RUNTIME_ROOT) not in sys.path:
 
 from scripts.loopmem.configuration import (  # noqa: E402
     merge_codex_hooks,
+    merge_codex_config,
+    merge_codex_permission_profile,
     merge_codex_writable_root,
     remove_codex_hooks,
+    remove_codex_permission_profile,
     remove_codex_writable_root,
     serialise_json,
 )
@@ -229,7 +232,11 @@ def stage_install(home: Path, stage: Path) -> tuple[list[Target], dict[str, obje
 
     config_text = _read_text(codex / "config.toml")
     config = files / "config.toml"
-    config.write_text(merge_codex_writable_root(config_text), encoding="utf-8")
+    try:
+        merged_config_text = merge_codex_config(config_text)
+    except ValueError as error:
+        raise InstallerError(str(error), codex / "config.toml") from error
+    config.write_text(merged_config_text, encoding="utf-8")
 
     hooks_text = _read_text(codex / "hooks.json", "{}\n")
     try:
@@ -287,7 +294,29 @@ def stage_install(home: Path, stage: Path) -> tuple[list[Target], dict[str, obje
         }
         for target in targets
     }
-    manifest: dict[str, object] = {"schema_version": 1, "managed": managed}
+    original_config = tomllib.loads(config_text)
+    profile_metadata: dict[str, object] = {
+        "name": "loop-memory",
+        "had_default_permissions": "default_permissions" in original_config,
+        "previous_default_permissions": original_config.get("default_permissions"),
+    }
+    existing_manifest_path = home / ".local/state/loop-memory-installer/manifest.json"
+    if existing_manifest_path.is_file() and not existing_manifest_path.is_symlink():
+        try:
+            existing_manifest = json.loads(existing_manifest_path.read_text(encoding="utf-8"))
+            existing_profile_metadata = existing_manifest.get("codex_permission_profile")
+            if isinstance(existing_profile_metadata, dict):
+                if "had_default_permissions" in existing_profile_metadata:
+                    profile_metadata["had_default_permissions"] = existing_profile_metadata["had_default_permissions"]
+                if "previous_default_permissions" in existing_profile_metadata:
+                    profile_metadata["previous_default_permissions"] = existing_profile_metadata["previous_default_permissions"]
+        except (OSError, json.JSONDecodeError):
+            pass
+    manifest: dict[str, object] = {
+        "schema_version": 1,
+        "managed": managed,
+        "codex_permission_profile": profile_metadata,
+    }
     manifest_file = files / "manifest.json"
     manifest_file.write_text(
         json.dumps(manifest, indent=2, sort_keys=True) + "\n",
@@ -519,6 +548,19 @@ def _verify_static_install(home: Path) -> None:
         or merge_codex_writable_root(config) != config
     ):
         raise InstallerError("config_verification_failed")
+    permissions = parsed_config.get("permissions")
+    profile = permissions.get("loop-memory") if isinstance(permissions, dict) else None
+    filesystem = profile.get("filesystem") if isinstance(profile, dict) else None
+    if (
+        parsed_config.get("default_permissions") != "loop-memory"
+        or not isinstance(profile, dict)
+        or not isinstance(profile.get("extends"), str)
+        or not isinstance(filesystem, dict)
+        or filesystem.get("~/loop-memory") != "write"
+        or set(filesystem) != {"~/loop-memory"}
+        or merge_codex_permission_profile(config) != config
+    ):
+        raise InstallerError("config_verification_failed")
     hooks = json.loads((home / ".codex/hooks.json").read_text(encoding="utf-8"))
     converged = merge_codex_hooks(hooks)
     if converged != hooks:
@@ -695,6 +737,16 @@ def stage_uninstall(home: Path, stage: Path) -> tuple[list[Target], list[Path]]:
     files = stage / "files"
     files.mkdir()
     codex = home / ".codex"
+    profile_metadata = manifest.get("codex_permission_profile")
+    previous_default: object | None = None
+    has_previous_default = False
+    if isinstance(profile_metadata, dict):
+        if profile_metadata.get("had_default_permissions") is True:
+            previous_default = profile_metadata.get("previous_default_permissions")
+            has_previous_default = True
+        elif profile_metadata.get("had_default_permissions") is False:
+            previous_default = None
+            has_previous_default = True
 
     rewrite: list[Target] = []
     if (codex / "AGENTS.md").exists():
@@ -706,10 +758,15 @@ def stage_uninstall(home: Path, stage: Path) -> tuple[list[Target], list[Path]]:
         rewrite.append(Target(".codex/AGENTS.md", codex / "AGENTS.md", agents, "file"))
     if (codex / "config.toml").exists():
         config = files / "config.toml"
-        config.write_text(
-            remove_codex_writable_root(_read_text(codex / "config.toml")),
-            encoding="utf-8",
-        )
+        current_config = remove_codex_writable_root(_read_text(codex / "config.toml"))
+        if has_previous_default:
+            current_config = remove_codex_permission_profile(
+                current_config,
+                previous_default_permissions=previous_default,
+            )
+        else:
+            current_config = remove_codex_permission_profile(current_config)
+        config.write_text(current_config, encoding="utf-8")
         rewrite.append(
             Target(".codex/config.toml", codex / "config.toml", config, "file")
         )

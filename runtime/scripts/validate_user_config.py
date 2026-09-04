@@ -81,6 +81,13 @@ def _without_codex_owned(value: dict[str, object]) -> dict[str, object]:
         section.pop("writable_roots", None)
         if not section:
             result.pop("sandbox_workspace_write", None)
+    if result.get("default_permissions") == "loop-memory":
+        result.pop("default_permissions", None)
+    permissions = result.get("permissions")
+    if isinstance(permissions, dict):
+        permissions.pop("loop-memory", None)
+        if not permissions:
+            result.pop("permissions", None)
     return result
 
 
@@ -101,7 +108,7 @@ def main() -> int:
     settings = json.loads(args.settings.read_text(encoding="utf-8"))
     config_keys = set(config)
     source_keys = set(source_config)
-    if config_keys - source_keys - {"sandbox_workspace_write"} or source_keys - config_keys:
+    if config_keys - source_keys - {"sandbox_workspace_write", "default_permissions", "permissions"} or source_keys - config_keys:
         raise SystemExit("staged Codex top-level key set changed")
     if set(hooks) - set(source_hooks) - {"hooks"} or set(source_hooks) - set(hooks):
         raise SystemExit("staged Codex hook top-level key set changed")
@@ -112,8 +119,26 @@ def main() -> int:
         raise SystemExit("staged config must contain one ~/loop-memory root")
     if any(value in {"~/loop-memory/", "$HOME/loop-memory", "$HOME/loop-memory/"} for value in roots):
         raise SystemExit("staged config contains a noncanonical Loop Memory root")
-    if config.get("sandbox_workspace_write", {}).get("network_access") is not True:
-        raise SystemExit("staged config must enable network_access")
+    network_access = config.get("sandbox_workspace_write", {}).get("network_access")
+    if network_access is not None and not isinstance(network_access, bool):
+        raise SystemExit("staged config has invalid network_access")
+    permissions = config.get("permissions", {})
+    profile = permissions.get("loop-memory", {}) if isinstance(permissions, dict) else {}
+    filesystem = profile.get("filesystem", {}) if isinstance(profile, dict) else {}
+    network = profile.get("network", {}) if isinstance(profile, dict) else {}
+    if (
+        config.get("default_permissions") != "loop-memory"
+        or not isinstance(profile, dict)
+        or set(profile) - {"extends", "filesystem", "network"}
+        or not isinstance(profile.get("extends"), str)
+        or not isinstance(filesystem, dict)
+        or set(filesystem) != {"~/loop-memory"}
+        or filesystem.get("~/loop-memory") != "write"
+        or not isinstance(network, dict)
+        or set(network) - {"enabled"}
+        or ("enabled" in network and not isinstance(network["enabled"], bool))
+    ):
+        raise SystemExit("staged config must activate Loop Memory permission profile")
     if _without_codex_owned(source_config) != _without_codex_owned(config):
         raise SystemExit("unowned Codex configuration drifted")
     expected_codex = {"SessionStart", "SessionEnd", "SubagentStart"}

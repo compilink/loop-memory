@@ -4,6 +4,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import tomllib
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -120,6 +121,12 @@ class StagingTests(unittest.TestCase):
             staged = (stage / "files/config.toml").read_text(encoding="utf-8")
             self.assertIn("network_access = false", staged)
             self.assertIn('writable_roots = ["~/loop-memory"]', staged)
+            parsed = tomllib.loads(staged)
+            self.assertEqual(parsed["default_permissions"], "loop-memory")
+            self.assertEqual(
+                parsed["permissions"]["loop-memory"]["filesystem"]["~/loop-memory"],
+                "write",
+            )
 
 
 class TransactionTests(unittest.TestCase):
@@ -193,6 +200,27 @@ class MemoryInitializationTests(unittest.TestCase):
 
 
 class UninstallTests(unittest.TestCase):
+    def test_uninstall_restores_previous_codex_default_permission(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            home = Path(temporary) / "home"
+            codex = home / ".codex"
+            codex.mkdir(parents=True)
+            original = (
+                'default_permissions = "custom"\n'
+                '[permissions.custom]\n'
+                'extends = ":workspace"\n'
+            )
+            (codex / "config.toml").write_text(original, encoding="utf-8")
+            install.run_install(home)
+            self.assertEqual(
+                tomllib.loads((codex / "config.toml").read_text(encoding="utf-8"))["default_permissions"],
+                "loop-memory",
+            )
+            install.run_uninstall(home)
+            restored = tomllib.loads((codex / "config.toml").read_text(encoding="utf-8"))
+            self.assertEqual(restored["default_permissions"], "custom")
+            self.assertNotIn("loop-memory", restored["permissions"])
+
     def test_uninstall_removes_only_managed_state_and_preserves_memory(self):
         with tempfile.TemporaryDirectory() as temporary:
             home = Path(temporary) / "home"

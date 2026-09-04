@@ -25,10 +25,12 @@ writes, promotion, migration, and irreversible external side effects; read-only
 diagnosis and recoverable local work may continue.
 
 `stage_user_config.py` consumes sanitized inputs and writes disposable
-`config.toml`, `hooks.json`, and `settings.json` artifacts.  The merge keeps
-unknown settings and existing hook definitions, adds only the required
-Loop-Memory hooks, and normalizes `~/loop-memory` exactly once.  It does not
-introduce a `default_permissions` profile or widen Claude permissions.
+`config.toml`, `hooks.json`, and `settings.json` artifacts. The Codex merge
+keeps unknown settings and existing hook definitions, normalizes
+`~/loop-memory` exactly once, and activates the native `loop-memory` permission
+profile (`default_permissions` plus an exact filesystem `write` entry). The
+profile extends the existing workspace policy and mirrors its configured
+network setting; Claude permissions are unchanged.
 
 `validate_user_config.py` parses staged TOML/JSON, compares staged top-level
 key sets with the sanitized inputs, and prints only `OK`, the canonical root,

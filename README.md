@@ -50,6 +50,13 @@ The installer preserves existing Codex configuration, installs one managed
 Loop Engineering block in `~/.codex/AGENTS.md`, and initializes
 `~/loop-memory` only when it does not already exist.
 
+It also installs Codex's native `loop-memory` permission profile as the default
+for new tasks. After Codex reloads its configuration (restart the Desktop app
+once if it was already open), new tasks receive `~/loop-memory` read/write
+access automatically; no per-task `--add-dir` step is needed. Tasks that were
+already open keep their original sandbox and must be recreated to receive the
+new profile.
+
 If the result contains `codex_trust_review=required`, open `/hooks` in Codex,
 review the three Loop Memory lifecycle commands, and approve them once.
 

@@ -35,6 +35,13 @@ old and new root together return a typed conflict instead of being merged.
 
 ## Enter and Access Recovery
 
+The installer configures Codex's native `loop-memory` permission profile as
+the default for new threads. It extends `:workspace` and grants the exact
+`~/loop-memory` filesystem entry with `write` access (which includes reads),
+while preserving the existing workspace network setting. Existing threads keep
+the sandbox snapshot created when they started; close and recreate a thread if
+it predates the profile installation.
+
 ```bash
 loop-memory enter \
   --cwd PATH \
